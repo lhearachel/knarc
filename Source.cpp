@@ -1,148 +1,170 @@
-#include <cstring>
+#include <cstdio>
+#include <exception>
 #include <iostream>
-#include <string>
+#include <stdexcept>
 
+#include "argparse.hpp"
 #include "Narc.h"
 
-using namespace std;
+#define PROGRAM_NAME            "knarc"
+#define PROGRAM_VERSION_MAJOR   2
+#define PROGRAM_VERSION_MINOR   0
+#define PROGRAM_VERSION_PATCH   0
+
+template<typename ... Args>
+std::string string_format(const std::string& format, Args ... args)
+{
+    int strsize = std::snprintf(nullptr, 0, format.c_str(), args ...) + 1; // + '\0'
+    if (strsize <= 0) {
+        throw std::runtime_error("Format allocation error");
+    }
+
+    auto size = static_cast<size_t>(strsize);
+    std::unique_ptr<char[]> buf(new char[size]);
+    std::snprintf(buf.get(), size, format.c_str(), args ...);
+
+    return std::string(buf.get(), buf.get() + size - 1); // trim '\0'
+}
+
+#define PROGRAM_VERSION         string_format("{}.{}",    PROGRAM_VERSION_MAJOR, PROGRAM_VERSION_MINOR)
+#define PROGRAM_VERSION_PATCHED string_format("{}.{}.{}", PROGRAM_VERSION_MAJOR, PROGRAM_VERSION_MINOR, PROGRAM_VERSION_PATCH)
 
 bool debug = false;
-bool pack_no_fnt = true;
+bool build_fnt = false;
 bool output_header = false;
 
 void PrintError(NarcError error)
 {
     switch (error)
     {
-        case NarcError::None:								cout << "ERROR: No error???" << endl;										break;
-        case NarcError::InvalidInputFile:					cout << "ERROR: Invalid input file" << endl;								break;
-        case NarcError::InvalidHeaderId:					cout << "ERROR: Invalid header ID" << endl;									break;
-        case NarcError::InvalidByteOrderMark:				cout << "ERROR: Invalid byte order mark" << endl;							break;
-        case NarcError::InvalidVersion:						cout << "ERROR: Invalid NARC version" << endl;								break;
-        case NarcError::InvalidHeaderSize:					cout << "ERROR: Invalid header size" << endl;								break;
-        case NarcError::InvalidChunkCount:					cout << "ERROR: Invalid chunk count" << endl;								break;
-        case NarcError::InvalidFileAllocationTableId:		cout << "ERROR: Invalid file allocation table ID" << endl;					break;
-        case NarcError::InvalidFileAllocationTableReserved:	cout << "ERROR: Invalid file allocation table reserved section" << endl;	break;
-        case NarcError::InvalidFileNameTableId:				cout << "ERROR: Invalid file name table ID" << endl;						break;
-        case NarcError::InvalidFileNameTableEntryId:		cout << "ERROR: Invalid file name table entry ID" << endl;					break;
-        case NarcError::InvalidFileImagesId:				cout << "ERROR: Invalid file images ID" << endl;							break;
-        case NarcError::InvalidOutputFile:					cout << "ERROR: Invalid output file" << endl;								break;
-        default:											cout << "ERROR: Unknown error???" << endl;									break;
-    }
-}
+        case NarcError::None:
+            std::cerr << "ERROR: No error???" << std::endl;
+            break;
 
-static inline void usage() {
-    cout << "OVERVIEW: Knarc" << endl << endl;
-    cout << "USAGE: knarc [options] -d DIRECTORY [-p TARGET | -u SOURCE]" << endl << endl;
-    cout << "OPTIONS:" << endl;
-    cout << "\t-d DIRECTORY\tDirectory to pack from/unpack to" << endl;
-    cout << "\t-p TARGET\tPack to the target NARC" << endl;
-    cout << "\t-u SOURCE\tUnpack from the source NARC" << endl;
-    cout << "\t-n\tBuild the filename table (default: discards filenames)" << endl;
-    cout << "\t-D/--debug\tPrint additional debug messages" << endl;
-    cout << "\t-h/--help\tPrint this message and exit" << endl;
-    cout << "\t-i\tOutput a .naix header" << endl;
+        case NarcError::InvalidInputFile:
+            std::cerr << "ERROR: Invalid input file" << std::endl;
+            break;
+
+        case NarcError::InvalidHeaderId:
+            std::cerr << "ERROR: Invalid header ID" << std::endl;
+            break;
+
+        case NarcError::InvalidByteOrderMark:
+            std::cerr << "ERROR: Invalid byte order mark" << std::endl;
+            break;
+
+        case NarcError::InvalidVersion:
+            std::cerr << "ERROR: Invalid NARC version" << std::endl;
+            break;
+
+        case NarcError::InvalidHeaderSize:
+            std::cerr << "ERROR: Invalid header size" << std::endl;
+            break;
+
+        case NarcError::InvalidChunkCount:
+            std::cerr << "ERROR: Invalid chunk count" << std::endl;
+            break;
+
+        case NarcError::InvalidFileAllocationTableId:
+            std::cerr << "ERROR: Invalid file allocation table ID" << std::endl;
+            break;
+
+        case NarcError::InvalidFileAllocationTableReserved:
+            std::cerr << "ERROR: Invalid file allocation table reserved section" << std::endl;
+            break;
+
+        case NarcError::InvalidFileNameTableId:
+            std::cerr << "ERROR: Invalid file name table ID" << std::endl;
+            break;
+
+        case NarcError::InvalidFileNameTableEntryId:
+            std::cerr << "ERROR: Invalid file name table entry ID" << std::endl;
+            break;
+
+        case NarcError::InvalidFileImagesId:
+            std::cerr << "ERROR: Invalid file images ID" << std::endl;
+            break;
+
+        case NarcError::InvalidOutputFile:
+            std::cerr << "ERROR: Invalid output file" << std::endl;
+            break;
+
+        default:
+            std::cerr << "ERROR: Unknown error???" << std::endl;
+            break;
+    }
 }
 
 int main(int argc, char* argv[])
 {
-    string directory = "";
-    string fileName = "";
-    bool pack = false;
+    std::string directory, source, target;
+    argparse::ArgumentParser program(PROGRAM_NAME, PROGRAM_VERSION);
 
-    for (int i = 1; i < argc; ++i)
-    {
-        if (!strcmp(argv[i], "-d"))
-        {
-            if (i == (argc - 1))
-            {
-                cerr << "ERROR: No directory specified" << endl;
+    program.add_argument("-d", "--directory")
+        .metavar("DIRECTORY")
+        .help("directory to be packed or to dump unpacked files")
+        .required()
+        .store_into(directory);
 
-                return 1;
-            }
+    auto &pack_or_unpack = program.add_mutually_exclusive_group();
+    pack_or_unpack.add_argument("-p", "--pack")
+        .metavar("SOURCE")
+        .help("directory to be packed to a target NARC")
+        .store_into(source);
+    pack_or_unpack.add_argument("-u", "--unpack")
+        .metavar("TARGET")
+        .help("directory to dump unpacked files from a source NARC")
+        .store_into(target);
 
-            if (!directory.empty()) {
-                cerr << "ERROR: Multiple directories specified" << endl;
-                return 1;
-            }
-            directory = argv[++i];
-        }
-        else if (!strcmp(argv[i], "-p"))
-        {
-            if (i == (argc - 1))
-            {
-                cerr << "ERROR: No NARC specified to pack to" << endl;
+    program.add_argument("-f", "--filename-table")
+        .help("build the filename table")
+        .flag()
+        .store_into(build_fnt);
 
-                return 1;
-            }
+    program.add_argument("-n", "--naix")
+        .help("output a C-style .naix header")
+        .flag()
+        .store_into(output_header);
 
-            if (!fileName.empty()) {
-                cerr << "ERROR: Multiple files specified" << endl;
-                return 1;
-            }
-            fileName = argv[++i];
-            pack = true;
-        }
-        else if (!strcmp(argv[i], "-u"))
-        {
-            if (i == (argc - 1))
-            {
-                cerr << "ERROR: No NARC specified to unpack from" << endl;
+    program.add_argument("--verbose")
+        .help("output additional program messages")
+        .flag()
+        .store_into(debug);
 
-                return 1;
-            }
-
-            if (!fileName.empty()) {
-                cerr << "ERROR: Multiple files specified" << endl;
-                return 1;
-            }
-            fileName = argv[++i];
-        } else if (!strcmp(argv[i], "-D") || !strcmp(argv[i], "--debug")) {
-            debug = true;
-        } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            usage();
-            return 0;
-        }
-        else if (!strcmp(argv[i], "-n")) {
-            pack_no_fnt = false;
-        }
-        else if (!strcmp(argv[i], "-i")) {
-            output_header = true;
-        }
-        else {
-            usage();
-            cerr << "ERROR: Unrecognized argument: " << argv[i] << endl;
-            return 1;
-        }
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::exception& err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        std::exit(1);
     }
 
-    if (fileName.empty()) {
-        cerr << "ERROR: Missing -u or -p" << endl;
-        return 1;
-    }
-    if (directory.empty()) {
-        cerr << "ERROR: Missing -d" << endl;
-        return 1;
+    if (debug) {
+        std::cout << "directory: " << directory << std::endl;
+        std::cout << "source:    " << source << std::endl;
+        std::cout << "target:    " << target << std::endl;
+
+        std::cout << std::boolalpha;
+        std::cout << "build filename table? " << build_fnt << std::endl;
+        std::cout << "output NAIX header?   " << output_header << std::endl;
     }
 
     Narc narc;
-
+    bool pack = target.empty();
     if (pack)
     {
-        if (!narc.Pack(fileName, directory))
+        if (!narc.Pack(source, directory))
         {
             PrintError(narc.GetError());
-
-            return 1;
+            std::exit(1);
         }
     }
     else
     {
-        if (!narc.Unpack(fileName, directory))
+        if (!narc.Unpack(target, directory))
         {
             PrintError(narc.GetError());
-
-            return 1;
+            std::exit(1);
         }
     }
 

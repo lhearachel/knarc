@@ -28,7 +28,7 @@ namespace fs = std::filesystem;
 using namespace std;
 
 extern bool debug;
-extern bool pack_no_fnt;
+extern bool build_fnt;
 extern bool output_header;
 
 void Narc::AlignDword(ofstream& ofs, uint8_t paddingChar)
@@ -357,7 +357,7 @@ bool Narc::Pack(const fs::path& fileName, const fs::path& directory)
 
     vector<FileNameTableEntry> fntEntries;
 
-    if (!pack_no_fnt)
+    if (build_fnt)
     {
         fntEntries.push_back(
             {
@@ -407,7 +407,7 @@ bool Narc::Pack(const fs::path& fileName, const fs::path& directory)
         .ChunkSize = static_cast<uint32_t>(sizeof(FileNameTable) + (fntEntries.size() * sizeof(FileNameTableEntry)))
     };
 
-    if (!pack_no_fnt)
+    if (build_fnt)
     {
         for (const auto& subTable : subTables)
         {
@@ -456,7 +456,7 @@ bool Narc::Pack(const fs::path& fileName, const fs::path& directory)
         ofs.write(reinterpret_cast<char*>(&entry), sizeof(FileNameTableEntry));
     }
 
-    if (!pack_no_fnt)
+    if (build_fnt)
     {
         for (const auto& path : paths)
         {
