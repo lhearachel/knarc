@@ -7,8 +7,8 @@ if build_machine.system() == 'windows'
 endif
 
 cpp_srcs = [
-    'Source.cpp',
-    'Narc.cpp',
+    'main.cpp',
+    'narc.cpp',
 ]
 
 c_args = [

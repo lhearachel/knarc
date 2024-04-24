@@ -4,7 +4,7 @@
 #include <stdexcept>
 
 #include "argparse.hpp"
-#include "Narc.h"
+#include "narc.h"
 
 #define PROGRAM_NAME            "knarc"
 #define PROGRAM_VERSION_MAJOR   2

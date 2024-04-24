@@ -13,11 +13,11 @@ else
 LDFLAGS  += -lstdc++fs
 endif
 endif
-CXX_SRCS := Source.cpp Narc.cpp
+CXX_SRCS := main.cpp narc.cpp
 C_OBJS   := $(C_SRCS:%.c=%.o)
 CXX_OBJS := $(CXX_SRCS:%.cpp=%.o)
 OBJS     := $(C_OBJS) $(CXX_OBJS)
-HEADERS  := Narc.h fnmatch.h
+HEADERS  := narc.h fnmatch.h
 
 .PHONY: all clean
 
