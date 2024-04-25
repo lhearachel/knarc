@@ -2,7 +2,9 @@
 Language: Cpp
 AlignAfterOpenBracket: BlockIndent
 AlignConsecutiveMacros: Consecutive
+AlignOperands: AlignAfterOperator
 AllowShortIfStatementsOnASingleLine: false
+BreakBeforeBinaryOperators: NonAssignment
 BreakBeforeBraces: WebKit # break before braces only for functions
 ColumnLimit: 0
 ContinuationIndentWidth: 4

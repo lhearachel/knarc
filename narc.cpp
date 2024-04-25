@@ -9,7 +9,6 @@
 #include <iostream>
 #include <map>
 #include <memory>
-#include <regex>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -58,20 +57,21 @@ bool Narc::Cleanup(ofstream &ofs, const NarcError &e)
     return false;
 }
 
-std::vector<fs::directory_entry> Narc::KnarcOrderDirectoryIterator(const fs::path &path, bool recursive) const
+vector<fs::directory_entry> Narc::KnarcOrderDirectoryIterator(const fs::path &path, bool recursive) const
 {
-    std::vector<fs::directory_entry> ordered_files;
-    std::vector<fs::directory_entry> unordered_files;
+    vector<fs::directory_entry> ordered_files;
+    vector<fs::directory_entry> unordered_files;
 
     // open the order file
     if (fs::exists(path / ".knarcorder")) {
-        std::ifstream order_file(path / ".knarcorder");
+        ifstream order_file(path / ".knarcorder");
         if (order_file) {
             if (debug) {
                 cerr << "DEBUG: knarcorder file exists" << endl;
             }
+
             // read the filenames in the order file and add the corresponding directory entries to the ordered files vector
-            std::string filename;
+            string filename;
             while (std::getline(order_file, filename)) {
                 fs::path file_path = path / filename;
                 if (fs::exists(file_path)) {
@@ -88,10 +88,11 @@ std::vector<fs::directory_entry> Narc::KnarcOrderDirectoryIterator(const fs::pat
     if (recursive) {
         for (auto &entry : fs::directory_iterator(path)) {
             if (entry.is_directory()) {
-                std::vector<fs::directory_entry> subdirectory_files =
-                    KnarcOrderDirectoryIterator(entry.path(), true);
+                vector<fs::directory_entry> subdirectory_files = KnarcOrderDirectoryIterator(entry.path(), true);
                 ordered_files.insert(
-                    ordered_files.end(), subdirectory_files.begin(), subdirectory_files.end()
+                    ordered_files.end(),
+                    subdirectory_files.begin(),
+                    subdirectory_files.end()
                 );
             }
         }
@@ -99,29 +100,35 @@ std::vector<fs::directory_entry> Narc::KnarcOrderDirectoryIterator(const fs::pat
 
     // add the remaining files in alphabetical order
     for (auto &entry : fs::directory_iterator(path)) {
-        if (entry.is_regular_file() && entry.path().filename() != ".knarcorder") {
-            if (std::find(ordered_files.begin(), ordered_files.end(), entry) == ordered_files.end()) {
-                unordered_files.push_back(entry);
-            }
+        // clang-format off
+        if (entry.is_regular_file()
+                && entry.path().filename() != ".knarcorder"
+                && find(ordered_files.begin(), ordered_files.end(), entry) == ordered_files.end()) {
+            unordered_files.push_back(entry);
         }
+        // clang-format on
     }
-    std::sort(unordered_files.begin(), unordered_files.end(), [](const fs::directory_entry &a, const fs::directory_entry &b) {
-        // I fucking hate C++
-        string aStr = a.path().filename().string();
-        string bStr = b.path().filename().string();
 
-        for (size_t i = 0; i < aStr.size(); ++i) {
-            aStr[i] = tolower(aStr[i]);
+    // clang-format off
+    sort(unordered_files.begin(), unordered_files.end(),
+        [](const fs::directory_entry &a, const fs::directory_entry &b) {
+            string aStr = a.path().filename().string();
+            string bStr = b.path().filename().string();
+
+            for (size_t i = 0; i < aStr.size(); ++i) {
+                aStr[i] = tolower(aStr[i]);
+            }
+
+            for (size_t i = 0; i < bStr.size(); ++i) {
+                bStr[i] = tolower(bStr[i]);
+            }
+
+            return aStr < bStr;
         }
+    );
+    // clang-format on
 
-        for (size_t i = 0; i < bStr.size(); ++i) {
-            bStr[i] = tolower(bStr[i]);
-        }
-
-        return aStr < bStr;
-    });
     ordered_files.insert(ordered_files.end(), unordered_files.begin(), unordered_files.end());
-
     return ordered_files;
 }
 
@@ -133,21 +140,25 @@ vector<fs::directory_entry> Narc::OrderedDirectoryIterator(const fs::path &path,
         v.push_back(de);
     }
 
-    sort(v.begin(), v.end(), [](const fs::directory_entry &a, const fs::directory_entry &b) {
-        // I fucking hate C++
-        string aStr = a.path().filename().string();
-        string bStr = b.path().filename().string();
+    // clang-format off
+    sort(v.begin(), v.end(),
+        [](const fs::directory_entry &a, const fs::directory_entry &b) {
+            // I fucking hate C++
+            string aStr = a.path().filename().string();
+            string bStr = b.path().filename().string();
 
-        for (size_t i = 0; i < aStr.size(); ++i) {
-            aStr[i] = tolower(aStr[i]);
+            for (size_t i = 0; i < aStr.size(); ++i) {
+                aStr[i] = tolower(aStr[i]);
+            }
+
+            for (size_t i = 0; i < bStr.size(); ++i) {
+                bStr[i] = tolower(bStr[i]);
+            }
+
+            return aStr < bStr;
         }
-
-        for (size_t i = 0; i < bStr.size(); ++i) {
-            bStr[i] = tolower(bStr[i]);
-        }
-
-        return aStr < bStr;
-    });
+    );
+    // clang-format on
 
     if (recursive) {
         size_t vSize = v.size();
@@ -155,7 +166,6 @@ vector<fs::directory_entry> Narc::OrderedDirectoryIterator(const fs::path &path,
         for (size_t i = 0; i < vSize; ++i) {
             if (is_directory(v[i])) {
                 vector<fs::directory_entry> temp = OrderedDirectoryIterator(v[i], true);
-
                 v.insert(v.end(), temp.begin(), temp.end());
             }
         }
@@ -229,18 +239,17 @@ bool Narc::Pack(const fs::path &fileName, const fs::path &directory)
             c = toupper(c);
         }
 
+        // clang-format off
         ofhs << "/*\n"
-                " * THIS FILE WAS AUTOMATICALLY\n"
-                " *  GENERATED BY tools/knarc\n"
-                " *      DO NOT MODIFY!!!\n"
+                " * THIS FILE WAS AUTOMATICALLY GENERATED BY knarc\n"
+                " *              DO NOT MODIFY!!!\n"
                 " */\n"
                 "\n"
-                "#ifndef NARC_"
-             << stem_upper << "_NAIX_\n"
-                              "#define NARC_"
-             << stem_upper << "_NAIX_\n"
-                              "\n"
-                              "enum {\n";
+                "#ifndef NARC_" << stem_upper << "_NAIX_\n"
+                "#define NARC_" << stem_upper << "_NAIX_\n"
+                "\n"
+                "enum {\n";
+        // clang-format on
     }
     vector<FileAllocationTableEntry> fatEntries;
     uint16_t directoryCounter = 1;
@@ -298,10 +307,14 @@ bool Narc::Pack(const fs::path &fileName, const fs::path &directory)
     directoryCounter = 0;
 
     for (const auto &de : KnarcOrderDirectoryIterator(directory, true)) {
-        if (!subTables.count(de.path().parent_path()) && (keep_patterns.matches(de.path().filename().string()) || !ignore_patterns.matches(de.path().filename().string()))) {
+        // clang-format off
+        if (!subTables.count(de.path().parent_path())
+                && (keep_patterns.matches(de.path().filename().string())
+                    || !ignore_patterns.matches(de.path().filename().string()))) {
             subTables.insert({ de.path().parent_path(), "" });
             paths.push_back(de.path().parent_path());
         }
+        // clang-format on
 
         if (is_directory(de)) {
             ++directoryCounter;
