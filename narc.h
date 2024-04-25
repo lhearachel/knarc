@@ -13,8 +13,7 @@ namespace fs = std::experimental::filesystem;
 namespace fs = std::filesystem;
 #endif
 
-enum class NarcError
-{
+enum class NarcError {
     None,
     InvalidInputFile,
     InvalidHeaderId,
@@ -30,8 +29,7 @@ enum class NarcError
     InvalidOutputFile
 };
 
-struct Header
-{
+struct Header {
     uint32_t Id;
     uint16_t ByteOrderMark;
     uint16_t Version;
@@ -40,55 +38,49 @@ struct Header
     uint16_t ChunkCount;
 };
 
-struct FileAllocationTable
-{
+struct FileAllocationTable {
     uint32_t Id;
     uint32_t ChunkSize;
     uint16_t FileCount;
     uint16_t Reserved;
 };
 
-struct FileAllocationTableEntry
-{
+struct FileAllocationTableEntry {
     uint32_t Start;
     uint32_t End;
 };
 
-struct FileNameTable
-{
+struct FileNameTable {
     uint32_t Id;
     uint32_t ChunkSize;
 };
 
-struct FileNameTableEntry
-{
+struct FileNameTableEntry {
     uint32_t Offset;
     uint16_t FirstFileId;
     uint16_t Utility;
 };
 
-struct FileImages
-{
+struct FileImages {
     uint32_t Id;
     uint32_t ChunkSize;
 };
 
-class Narc
-{
-public:
+class Narc {
+  public:
     NarcError GetError() const;
 
-    bool Pack(const fs::path& fileName, const fs::path& directory);
-    bool Unpack(const fs::path& fileName, const fs::path& directory);
+    bool Pack(const fs::path &fileName, const fs::path &directory);
+    bool Unpack(const fs::path &fileName, const fs::path &directory);
 
-private:
+  private:
     NarcError error = NarcError::None;
 
-    void AlignDword(std::ofstream& ofs, uint8_t paddingChar);
+    void AlignDword(std::ofstream &ofs, uint8_t paddingChar);
 
-    bool Cleanup(std::ifstream& ifs, const NarcError& e);
-    bool Cleanup(std::ofstream& ofs, const NarcError& e);
+    bool Cleanup(std::ifstream &ifs, const NarcError &e);
+    bool Cleanup(std::ofstream &ofs, const NarcError &e);
 
-    std::vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path& path, bool recursive) const;
-    std::vector<fs::directory_entry> OrderedDirectoryIterator(const fs::path& path, bool recursive) const;
+    std::vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bool recursive) const;
+    std::vector<fs::directory_entry> OrderedDirectoryIterator(const fs::path &path, bool recursive) const;
 };

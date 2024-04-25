@@ -1,0 +1,19 @@
+---
+Language: Cpp
+AlignAfterOpenBracket: BlockIndent
+AlignConsecutiveMacros: Consecutive
+AllowShortIfStatementsOnASingleLine: false
+BreakBeforeBraces: WebKit # break before braces only for functions
+ColumnLimit: 0
+ContinuationIndentWidth: 4
+Cpp11BracedListStyle: false
+IndentCaseLabels: false
+IndentWidth: 4
+PointerAlignment: Right
+RemoveSemicolon: true
+SpaceAfterTemplateKeyword: false
+SpaceBeforeCpp11BracedList: true
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeRangeBasedForLoopColon: true
+UseTab: Never
