@@ -1,5 +1,5 @@
-CXXFLAGS := -std=c++17 -O2 -Wall -Wno-switch
-CFLAGS   := -O2 -Wall -Wno-switch
+CXXFLAGS := -std=c++20 -O2 -Wall -Wno-switch -Wpedantic -Wextra -Werror
+CFLAGS   := -O2 -Wall -Wno-switch -Wpedantic -Wextra -Werror
 
 ifeq ($(OS),Windows_NT)
 C_SRCS   := fnmatch.c

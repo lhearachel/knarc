@@ -15,13 +15,19 @@ c_args = [
     '-O2',
     '-Wall',
     '-Wno-switch',
+    '-Wpedantic',
+    '-Wextra',
+    '-Werror',
 ]
 
 cpp_args = [
-    '-std=c++17',
+    '-std=c++20',
     '-O2',
     '-Wall',
     '-Wno-switch',
+    '-Wpedantic',
+    '-Wextra',
+    '-Werror',
 ]
 
 knarc_exe = executable('knarc',

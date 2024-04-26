@@ -25,7 +25,6 @@ enum class NarcError {
     InvalidFileAllocationTableId,
     InvalidFileAllocationTableReserved,
     InvalidFileNameTableId,
-    InvalidFileNameTableEntryId,
     InvalidFileImagesId,
     InvalidOutputFile
 };

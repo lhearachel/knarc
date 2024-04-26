@@ -336,7 +336,7 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
                 if (static_cast<uint8_t>(subTables[paths[i]][j]) <= 0x7F) {
                     j += static_cast<uint8_t>(subTables[paths[i]][j]);
                     ++fntEntries.back().FirstFileId;
-                } else if (static_cast<uint8_t>(subTables[paths[i]][j]) <= 0xFF) {
+                } else {
                     j += static_cast<uint8_t>(subTables[paths[i]][j]) - 0x80 + 0x2;
                 }
             }
@@ -518,7 +518,7 @@ narc::NarcError narc::Unpack(const fs::path &file_name, const fs::path &director
                 ++fileId;
             } else if (length == 0x80) {
                 // Reserved
-            } else if (length <= 0xFF) {
+            } else {
                 length -= 0x80;
                 string directoryName;
 
@@ -533,8 +533,6 @@ narc::NarcError narc::Unpack(const fs::path &file_name, const fs::path &director
                 ifs.read(reinterpret_cast<char *>(&directoryId), sizeof(uint16_t));
 
                 file_names.get()[directoryId] = directoryName;
-            } else {
-                return NarcError::InvalidFileNameTableEntryId;
             }
         }
     }
@@ -625,10 +623,8 @@ narc::NarcError narc::Unpack(const fs::path &file_name, const fs::path &director
                     ++fileId;
                 } else if (length == 0x80) {
                     // Reserved
-                } else if (length <= 0xFF) {
-                    ifs.seekg(static_cast<uint64_t>(length) - 0x80 + 0x2, ios::cur);
                 } else {
-                    return NarcError::InvalidFileNameTableEntryId;
+                    ifs.seekg(static_cast<uint64_t>(length) - 0x80 + 0x2, ios::cur);
                 }
             }
         }

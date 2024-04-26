@@ -76,10 +76,6 @@ void PrintError(narc::NarcError error)
         std::cerr << "ERROR: Invalid file name table ID" << std::endl;
         break;
 
-    case narc::NarcError::InvalidFileNameTableEntryId:
-        std::cerr << "ERROR: Invalid file name table entry ID" << std::endl;
-        break;
-
     case narc::NarcError::InvalidFileImagesId:
         std::cerr << "ERROR: Invalid file images ID" << std::endl;
         break;
