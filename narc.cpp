@@ -30,11 +30,11 @@ extern bool debug;
 extern bool build_fnt;
 extern bool output_header;
 
-void Narc::AlignDword(ofstream &ofs, uint8_t paddingChar)
+void Narc::AlignDword(ofstream &ofs, uint8_t padding_byte)
 {
     if ((ofs.tellp() % 4) != 0) {
         for (int i = 4 - (ofs.tellp() % 4); i-- > 0;) {
-            ofs.write(reinterpret_cast<char *>(&paddingChar), sizeof(uint8_t));
+            ofs.write(reinterpret_cast<char *>(&padding_byte), sizeof(uint8_t));
         }
     }
 }
@@ -210,9 +210,9 @@ class WildcardVector : public vector<string> {
     }
 };
 
-bool Narc::Pack(const fs::path &fileName, const fs::path &directory)
+bool Narc::Pack(const fs::path &file_name, const fs::path &directory)
 {
-    ofstream ofs(fileName, ios::binary);
+    ofstream ofs(file_name, ios::binary);
 
     if (!ofs.good()) {
         return Cleanup(ofs, NarcError::InvalidOutputFile);
@@ -224,7 +224,7 @@ bool Narc::Pack(const fs::path &fileName, const fs::path &directory)
     // Pikalax 29 May 2021
     // Output an includable header that enumerates the NARC contents
     if (output_header) {
-        fs::path naixfname = fileName;
+        fs::path naixfname = file_name;
         naixfname.replace_extension(".naix");
 
         ofhs.open(naixfname);
@@ -233,7 +233,7 @@ bool Narc::Pack(const fs::path &fileName, const fs::path &directory)
             return Cleanup(ofs, NarcError::InvalidOutputFile);
         }
 
-        stem = fileName.stem().string();
+        stem = file_name.stem().string();
         stem_upper = stem;
         for (char &c : stem_upper) {
             c = toupper(c);
@@ -464,9 +464,9 @@ bool Narc::Pack(const fs::path &fileName, const fs::path &directory)
     return error == NarcError::None ? true : false;
 }
 
-bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
+bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
 {
-    ifstream ifs(fileName, ios::binary);
+    ifstream ifs(file_name, ios::binary);
 
     if (!ifs.good()) {
         return Cleanup(ifs, NarcError::InvalidInputFile);
@@ -525,7 +525,7 @@ bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
         ifs.read(reinterpret_cast<char *>(&fntEntries.back().Utility), sizeof(uint16_t));
     } while (static_cast<uint32_t>(ifs.tellg()) < (header.ChunkSize + fat.ChunkSize + sizeof(FileNameTable) + fntEntries[0].Offset));
 
-    unique_ptr<string[]> fileNames = make_unique<string[]>(0xFFFF);
+    unique_ptr<string[]> file_names = make_unique<string[]>(0xFFFF);
 
     for (size_t i = 0; i < fntEntries.size(); ++i) {
         ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + sizeof(FileNameTable) + fntEntries[i].Offset);
@@ -538,7 +538,7 @@ bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
                     uint8_t c;
                     ifs.read(reinterpret_cast<char *>(&c), sizeof(uint8_t));
 
-                    fileNames.get()[fntEntries[i].FirstFileId + fileId] += c;
+                    file_names.get()[fntEntries[i].FirstFileId + fileId] += c;
                 }
 
                 ++fileId;
@@ -558,7 +558,7 @@ bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
                 uint16_t directoryId;
                 ifs.read(reinterpret_cast<char *>(&directoryId), sizeof(uint16_t));
 
-                fileNames.get()[directoryId] = directoryName;
+                file_names.get()[directoryId] = directoryName;
             } else {
                 return Cleanup(ifs, NarcError::InvalidFileNameTableEntryId);
             }
@@ -587,7 +587,7 @@ bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
             ifs.read(buffer.get(), fatEntries.get()[i].End - fatEntries.get()[i].Start);
 
             ostringstream oss;
-            oss << fileName.stem().string() << "_" << setfill('0') << setw(8) << i << ".bin";
+            oss << file_name.stem().string() << "_" << setfill('0') << setw(8) << i << ".bin";
 
             ofstream ofs(oss.str(), ios::binary);
 
@@ -608,7 +608,7 @@ bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
             stack<string> directories;
 
             for (uint16_t j = fntEntries[i].Utility; j > 0xF000; j = fntEntries[j - 0xF000].Utility) {
-                directories.push(fileNames.get()[j]);
+                directories.push(file_names.get()[j]);
             }
 
             for (; !directories.empty(); directories.pop()) {
@@ -617,8 +617,8 @@ bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
             }
 
             if (fntEntries[i].Utility >= 0xF000) {
-                fs::create_directory(fileNames.get()[0xF000 + i]);
-                fs::current_path(fileNames.get()[0xF000 + i]);
+                fs::create_directory(file_names.get()[0xF000 + i]);
+                fs::current_path(file_names.get()[0xF000 + i]);
             }
 
             ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + sizeof(FileNameTable) + fntEntries[i].Offset);
@@ -634,7 +634,7 @@ bool Narc::Unpack(const fs::path &fileName, const fs::path &directory)
                     unique_ptr<char[]> buffer = make_unique<char[]>(fatEntries.get()[fntEntries[i].FirstFileId + fileId].End - fatEntries.get()[fntEntries[i].FirstFileId + fileId].Start);
                     ifs.read(buffer.get(), fatEntries.get()[fntEntries[i].FirstFileId + fileId].End - fatEntries.get()[fntEntries[i].FirstFileId + fileId].Start);
 
-                    ofstream ofs(fileNames.get()[fntEntries[i].FirstFileId + fileId], ios::binary);
+                    ofstream ofs(file_names.get()[fntEntries[i].FirstFileId + fileId], ios::binary);
 
                     if (!ofs.good()) {
                         ofs.close();

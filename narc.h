@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <fstream>
-#include <string>
 #include <vector>
 
 #if (__cplusplus < 201703L)
@@ -70,13 +69,13 @@ class Narc {
   public:
     NarcError GetError() const;
 
-    bool Pack(const fs::path &fileName, const fs::path &directory);
-    bool Unpack(const fs::path &fileName, const fs::path &directory);
+    bool Pack(const fs::path &file_name, const fs::path &directory);
+    bool Unpack(const fs::path &file_name, const fs::path &directory);
 
   private:
     NarcError error = NarcError::None;
 
-    void AlignDword(std::ofstream &ofs, uint8_t paddingChar);
+    void AlignDword(std::ofstream &ofs, uint8_t padding_byte);
 
     bool Cleanup(std::ifstream &ifs, const NarcError &e);
     bool Cleanup(std::ofstream &ofs, const NarcError &e);
