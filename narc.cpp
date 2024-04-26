@@ -116,48 +116,6 @@ vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bo
     return ordered_files;
 }
 
-vector<fs::directory_entry> OrderedDirectoryIterator(const fs::path &path, bool recursive)
-{
-    vector<fs::directory_entry> v;
-
-    for (const auto &de : fs::directory_iterator(path)) {
-        v.push_back(de);
-    }
-
-    // clang-format off
-    sort(v.begin(), v.end(),
-        [](const fs::directory_entry &a, const fs::directory_entry &b) {
-            // I fucking hate C++
-            string aStr = a.path().filename().string();
-            string bStr = b.path().filename().string();
-
-            for (size_t i = 0; i < aStr.size(); ++i) {
-                aStr[i] = tolower(aStr[i]);
-            }
-
-            for (size_t i = 0; i < bStr.size(); ++i) {
-                bStr[i] = tolower(bStr[i]);
-            }
-
-            return aStr < bStr;
-        }
-    );
-    // clang-format on
-
-    if (recursive) {
-        size_t vSize = v.size();
-
-        for (size_t i = 0; i < vSize; ++i) {
-            if (is_directory(v[i])) {
-                vector<fs::directory_entry> temp = OrderedDirectoryIterator(v[i], true);
-                v.insert(v.end(), temp.begin(), temp.end());
-            }
-        }
-    }
-
-    return v;
-}
-
 class WildcardVector : public vector<string> {
   public:
     WildcardVector(fs::path fp)
