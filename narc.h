@@ -12,6 +12,8 @@ namespace fs = std::experimental::filesystem;
 namespace fs = std::filesystem;
 #endif
 
+namespace narc {
+
 enum class NarcError {
     None,
     InvalidInputFile,
@@ -65,21 +67,9 @@ struct FileImages {
     uint32_t ChunkSize;
 };
 
-class Narc {
-  public:
-    NarcError GetError() const;
+typedef narc::NarcError (*NarcOp)(const fs::path &file_name, const fs::path &directory);
 
-    bool Pack(const fs::path &file_name, const fs::path &directory);
-    bool Unpack(const fs::path &file_name, const fs::path &directory);
+extern narc::NarcError Pack(const fs::path &file_name, const fs::path &directory);
+extern narc::NarcError Unpack(const fs::path &file_name, const fs::path &directory);
 
-  private:
-    NarcError error = NarcError::None;
-
-    void AlignDword(std::ofstream &ofs, uint8_t padding_byte);
-
-    bool Cleanup(std::ifstream &ifs, const NarcError &e);
-    bool Cleanup(std::ofstream &ofs, const NarcError &e);
-
-    std::vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bool recursive) const;
-    std::vector<fs::directory_entry> OrderedDirectoryIterator(const fs::path &path, bool recursive) const;
-};
+}; // namespace narc

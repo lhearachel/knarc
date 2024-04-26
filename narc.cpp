@@ -30,7 +30,9 @@ extern bool debug;
 extern bool build_fnt;
 extern bool output_header;
 
-void Narc::AlignDword(ofstream &ofs, uint8_t padding_byte)
+namespace {
+
+void AlignDword(ofstream &ofs, uint8_t padding_byte)
 {
     if ((ofs.tellp() % 4) != 0) {
         for (int i = 4 - (ofs.tellp() % 4); i-- > 0;) {
@@ -39,25 +41,7 @@ void Narc::AlignDword(ofstream &ofs, uint8_t padding_byte)
     }
 }
 
-bool Narc::Cleanup(ifstream &ifs, const NarcError &e)
-{
-    ifs.close();
-
-    error = e;
-
-    return false;
-}
-
-bool Narc::Cleanup(ofstream &ofs, const NarcError &e)
-{
-    ofs.close();
-
-    error = e;
-
-    return false;
-}
-
-vector<fs::directory_entry> Narc::KnarcOrderDirectoryIterator(const fs::path &path, bool recursive) const
+vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bool recursive)
 {
     vector<fs::directory_entry> ordered_files;
     vector<fs::directory_entry> unordered_files;
@@ -132,7 +116,7 @@ vector<fs::directory_entry> Narc::KnarcOrderDirectoryIterator(const fs::path &pa
     return ordered_files;
 }
 
-vector<fs::directory_entry> Narc::OrderedDirectoryIterator(const fs::path &path, bool recursive) const
+vector<fs::directory_entry> OrderedDirectoryIterator(const fs::path &path, bool recursive)
 {
     vector<fs::directory_entry> v;
 
@@ -174,11 +158,6 @@ vector<fs::directory_entry> Narc::OrderedDirectoryIterator(const fs::path &path,
     return v;
 }
 
-NarcError Narc::GetError() const
-{
-    return error;
-}
-
 class WildcardVector : public vector<string> {
   public:
     WildcardVector(fs::path fp)
@@ -210,12 +189,14 @@ class WildcardVector : public vector<string> {
     }
 };
 
-bool Narc::Pack(const fs::path &file_name, const fs::path &directory)
+}; // namespace
+
+narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
 {
     ofstream ofs(file_name, ios::binary);
 
     if (!ofs.good()) {
-        return Cleanup(ofs, NarcError::InvalidOutputFile);
+        return NarcError::InvalidOutputFile;
     }
 
     ofstream ofhs;
@@ -229,8 +210,7 @@ bool Narc::Pack(const fs::path &file_name, const fs::path &directory)
 
         ofhs.open(naixfname);
         if (!ofhs.good()) {
-            ofhs.close();
-            return Cleanup(ofs, NarcError::InvalidOutputFile);
+            return NarcError::InvalidOutputFile;
         }
 
         stem = file_name.stem().string();
@@ -291,7 +271,6 @@ bool Narc::Pack(const fs::path &file_name, const fs::path &directory)
     }
     if (output_header) {
         ofhs << "};\n\n#endif //NARC_" << stem_upper << "_NAIX_\n";
-        ofhs.close();
     }
 
     FileAllocationTable fat {
@@ -442,9 +421,7 @@ bool Narc::Pack(const fs::path &file_name, const fs::path &directory)
         ifstream ifs(de.path(), ios::binary | ios::ate);
 
         if (!ifs.good()) {
-            ifs.close();
-
-            return Cleanup(ofs, NarcError::InvalidInputFile);
+            return NarcError::InvalidInputFile;
         }
 
         streampos length = ifs.tellg();
@@ -452,53 +429,50 @@ bool Narc::Pack(const fs::path &file_name, const fs::path &directory)
 
         ifs.seekg(0);
         ifs.read(buffer.get(), length);
-        ifs.close();
 
         ofs.write(buffer.get(), length);
 
         AlignDword(ofs, 0xFF);
     }
 
-    ofs.close();
-
-    return error == NarcError::None ? true : false;
+    return NarcError::None;
 }
 
-bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
+narc::NarcError narc::Unpack(const fs::path &file_name, const fs::path &directory)
 {
     ifstream ifs(file_name, ios::binary);
 
     if (!ifs.good()) {
-        return Cleanup(ifs, NarcError::InvalidInputFile);
+        return NarcError::InvalidInputFile;
     }
 
     Header header;
     ifs.read(reinterpret_cast<char *>(&header), sizeof(Header));
 
     if (header.Id != 0x4352414E) {
-        return Cleanup(ifs, NarcError::InvalidHeaderId);
+        return NarcError::InvalidHeaderId;
     }
     if (header.ByteOrderMark != 0xFFFE) {
-        return Cleanup(ifs, NarcError::InvalidByteOrderMark);
+        return NarcError::InvalidByteOrderMark;
     }
     if ((header.Version != 0x0100) && (header.Version != 0x0000)) {
-        return Cleanup(ifs, NarcError::InvalidVersion);
+        return NarcError::InvalidVersion;
     }
     if (header.ChunkSize != 0x10) {
-        return Cleanup(ifs, NarcError::InvalidHeaderSize);
+        return NarcError::InvalidHeaderSize;
     }
     if (header.ChunkCount != 0x3) {
-        return Cleanup(ifs, NarcError::InvalidChunkCount);
+        return NarcError::InvalidChunkCount;
     }
 
     FileAllocationTable fat;
     ifs.read(reinterpret_cast<char *>(&fat), sizeof(FileAllocationTable));
 
     if (fat.Id != 0x46415442) {
-        return Cleanup(ifs, NarcError::InvalidFileAllocationTableId);
+        return NarcError::InvalidFileAllocationTableId;
     }
     if (fat.Reserved != 0x0) {
-        return Cleanup(ifs, NarcError::InvalidFileAllocationTableReserved);
+        return NarcError::InvalidFileAllocationTableReserved;
     }
 
     unique_ptr<FileAllocationTableEntry[]> fatEntries = make_unique<FileAllocationTableEntry[]>(fat.FileCount);
@@ -512,7 +486,7 @@ bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
     ifs.read(reinterpret_cast<char *>(&fnt), sizeof(FileNameTable));
 
     if (fnt.Id != 0x464E5442) {
-        return Cleanup(ifs, NarcError::InvalidFileNameTableId);
+        return NarcError::InvalidFileNameTableId;
     }
 
     vector<FileNameTableEntry> fntEntries;
@@ -560,7 +534,7 @@ bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
 
                 file_names.get()[directoryId] = directoryName;
             } else {
-                return Cleanup(ifs, NarcError::InvalidFileNameTableEntryId);
+                return NarcError::InvalidFileNameTableEntryId;
             }
         }
     }
@@ -573,7 +547,7 @@ bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
     ifs.read(reinterpret_cast<char *>(&fi), sizeof(FileImages));
 
     if (fi.Id != 0x46494D47) {
-        return Cleanup(ifs, NarcError::InvalidFileImagesId);
+        return NarcError::InvalidFileImagesId;
     }
 
     fs::create_directory(directory);
@@ -594,7 +568,7 @@ bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
             if (!ofs.good()) {
                 ofs.close();
 
-                return Cleanup(ifs, NarcError::InvalidOutputFile);
+                return NarcError::InvalidOutputFile;
             }
 
             ofs.write(buffer.get(), fatEntries.get()[i].End - fatEntries.get()[i].Start);
@@ -639,7 +613,7 @@ bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
                     if (!ofs.good()) {
                         ofs.close();
 
-                        return Cleanup(ifs, NarcError::InvalidOutputFile);
+                        return NarcError::InvalidOutputFile;
                     }
 
                     ofs.write(buffer.get(), fatEntries.get()[fntEntries[i].FirstFileId + fileId].End - fatEntries.get()[fntEntries[i].FirstFileId + fileId].Start);
@@ -654,13 +628,11 @@ bool Narc::Unpack(const fs::path &file_name, const fs::path &directory)
                 } else if (length <= 0xFF) {
                     ifs.seekg(static_cast<uint64_t>(length) - 0x80 + 0x2, ios::cur);
                 } else {
-                    return Cleanup(ifs, NarcError::InvalidFileNameTableEntryId);
+                    return NarcError::InvalidFileNameTableEntryId;
                 }
             }
         }
     }
 
-    ifs.close();
-
-    return error == NarcError::None ? true : false;
+    return NarcError::None;
 }

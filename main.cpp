@@ -33,58 +33,58 @@ bool debug = false;
 bool build_fnt = false;
 bool output_header = false;
 
-void PrintError(NarcError error)
+void PrintError(narc::NarcError error)
 {
     switch (error) {
-    case NarcError::None:
+    case narc::NarcError::None:
         std::cerr << "ERROR: No error???" << std::endl;
         break;
 
-    case NarcError::InvalidInputFile:
+    case narc::NarcError::InvalidInputFile:
         std::cerr << "ERROR: Invalid input file" << std::endl;
         break;
 
-    case NarcError::InvalidHeaderId:
+    case narc::NarcError::InvalidHeaderId:
         std::cerr << "ERROR: Invalid header ID" << std::endl;
         break;
 
-    case NarcError::InvalidByteOrderMark:
+    case narc::NarcError::InvalidByteOrderMark:
         std::cerr << "ERROR: Invalid byte order mark" << std::endl;
         break;
 
-    case NarcError::InvalidVersion:
+    case narc::NarcError::InvalidVersion:
         std::cerr << "ERROR: Invalid NARC version" << std::endl;
         break;
 
-    case NarcError::InvalidHeaderSize:
+    case narc::NarcError::InvalidHeaderSize:
         std::cerr << "ERROR: Invalid header size" << std::endl;
         break;
 
-    case NarcError::InvalidChunkCount:
+    case narc::NarcError::InvalidChunkCount:
         std::cerr << "ERROR: Invalid chunk count" << std::endl;
         break;
 
-    case NarcError::InvalidFileAllocationTableId:
+    case narc::NarcError::InvalidFileAllocationTableId:
         std::cerr << "ERROR: Invalid file allocation table ID" << std::endl;
         break;
 
-    case NarcError::InvalidFileAllocationTableReserved:
+    case narc::NarcError::InvalidFileAllocationTableReserved:
         std::cerr << "ERROR: Invalid file allocation table reserved section" << std::endl;
         break;
 
-    case NarcError::InvalidFileNameTableId:
+    case narc::NarcError::InvalidFileNameTableId:
         std::cerr << "ERROR: Invalid file name table ID" << std::endl;
         break;
 
-    case NarcError::InvalidFileNameTableEntryId:
+    case narc::NarcError::InvalidFileNameTableEntryId:
         std::cerr << "ERROR: Invalid file name table entry ID" << std::endl;
         break;
 
-    case NarcError::InvalidFileImagesId:
+    case narc::NarcError::InvalidFileImagesId:
         std::cerr << "ERROR: Invalid file images ID" << std::endl;
         break;
 
-    case NarcError::InvalidOutputFile:
+    case narc::NarcError::InvalidOutputFile:
         std::cerr << "ERROR: Invalid output file" << std::endl;
         break;
 
@@ -148,18 +148,11 @@ int main(int argc, char *argv[])
         std::cout << "output NAIX header?   " << output_header << std::endl;
     }
 
-    Narc narc;
-    bool pack = target.empty();
-    if (pack) {
-        if (!narc.Pack(source, directory)) {
-            PrintError(narc.GetError());
-            std::exit(1);
-        }
-    } else {
-        if (!narc.Unpack(target, directory)) {
-            PrintError(narc.GetError());
-            std::exit(1);
-        }
+    narc::NarcOp op = target.empty() ? narc::Pack : narc::Unpack;
+    narc::NarcError err = op(source, directory);
+    if (err != narc::NarcError::None) {
+        PrintError(err);
+        std::exit(1);
     }
 
     return 0;
