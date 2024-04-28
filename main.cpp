@@ -135,13 +135,13 @@ int main(int argc, char *argv[])
     }
 
     if (debug) {
-        std::cout << "directory: " << directory << std::endl;
-        std::cout << "source:    " << source << std::endl;
-        std::cout << "target:    " << target << std::endl;
+        std::cout << "[DEBUG] directory: " << directory << std::endl;
+        std::cout << "[DEBUG] source:    " << source << std::endl;
+        std::cout << "[DEBUG] target:    " << target << std::endl;
 
         std::cout << std::boolalpha;
-        std::cout << "build filename table? " << build_fnt << std::endl;
-        std::cout << "output NAIX header?   " << output_header << std::endl;
+        std::cout << "[DEBUG] build filename table? " << build_fnt << std::endl;
+        std::cout << "[DEBUG] output NAIX header?   " << output_header << std::endl;
     }
 
     narc::NarcOp op = target.empty() ? narc::Pack : narc::Unpack;

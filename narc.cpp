@@ -1,6 +1,7 @@
 #include "narc.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -51,7 +52,7 @@ vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bo
         ifstream order_file(path / ".knarcorder");
         if (order_file) {
             if (debug) {
-                cerr << "DEBUG: knarcorder file exists" << endl;
+                cout << "[DEBUG] knarcorder file exists" << endl;
             }
 
             // read the filenames in the order file and add the corresponding directory entries to the ordered files vector
@@ -60,7 +61,7 @@ vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bo
                 fs::path file_path = path / filename;
                 if (fs::exists(file_path)) {
                     if (debug) {
-                        cerr << "DEBUG: knarcorder file: " << file_path << endl;
+                        cout << "[DEBUG] knarcorder file: " << file_path << endl;
                     }
                     ordered_files.push_back(fs::directory_entry(file_path));
                 }
@@ -116,32 +117,66 @@ vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bo
     return ordered_files;
 }
 
+inline void ltrim(std::string &s)
+{
+    // clang-format off
+    s.erase(
+        s.begin(),
+        find_if(s.begin(), s.end(),
+            [](unsigned char c) {
+                return !isspace(c);
+            }
+        )
+    );
+    // clang-format on
+}
+
+inline void rtrim(std::string &s)
+{
+    // clang-format off
+    s.erase(
+        find_if(s.rbegin(), s.rend(),
+            [](unsigned char c) {
+                return !isspace(c);
+            }
+        ).base(),
+        s.end()
+    );
+    // clang-format on
+}
+
+inline void trim(std::string &s)
+{
+    ltrim(s);
+    rtrim(s);
+}
+
 class WildcardVector : public vector<string> {
   public:
     WildcardVector(fs::path fp)
     {
-        fstream infile;
-        if (!fs::exists(fp))
+        if (!fs::exists(fp)) {
             return;
+        }
+
+        fstream infile;
         infile.open(fp, ios_base::in);
+
         string line;
         while (getline(infile, line)) {
+            trim(line);
             if (!line.empty()) {
-                // strip CR
-                size_t i;
-                for (i = line.size() - 1; line[i] == '\r'; i--)
-                    ;
-                if (i < line.size() - 1)
-                    line.erase(i + 1);
                 push_back(line);
             }
         }
     }
+
     bool matches(string fp)
     {
         for (string &pattern : *this) {
-            if (fnmatch(pattern.c_str(), fp.c_str(), FNM_PERIOD) == 0)
+            if (fnmatch(pattern.c_str(), fp.c_str(), FNM_PERIOD) == 0) {
                 return true;
+            }
         }
         return false;
     }
@@ -158,8 +193,8 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
     }
 
     ofstream ofhs;
-    string stem;
-    string stem_upper;
+    string stem, stem_upper;
+
     // Pikalax 29 May 2021
     // Output an includable header that enumerates the NARC contents
     if (output_header) {
@@ -172,10 +207,7 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
         }
 
         stem = file_name.stem().string();
-        stem_upper = stem;
-        for (char &c : stem_upper) {
-            c = toupper(c);
-        }
+        transform(stem.begin(), stem.end(), stem_upper.begin(), ::toupper);
 
         // clang-format off
         ofhs << "/*\n"
@@ -190,7 +222,6 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
         // clang-format on
     }
     vector<FileAllocationTableEntry> fatEntries;
-    uint16_t directoryCounter = 1;
 
     WildcardVector ignore_patterns(directory / ".knarcignore");
     ignore_patterns.push_back(".*ignore");
@@ -201,16 +232,21 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
     int memberNo = 0;
     for (const auto &de : KnarcOrderDirectoryIterator(directory, true)) {
         if (is_directory(de)) {
-            ++directoryCounter;
-        } else if (keep_patterns.matches(de.path().filename().string()) || !ignore_patterns.matches(de.path().filename().string())) {
+            continue;
+        }
+
+        if (keep_patterns.matches(de.path().filename().string()) || !ignore_patterns.matches(de.path().filename().string())) {
             if (debug) {
-                cerr << "DEBUG: adding file " << de.path() << endl;
+                cout << "[DEBUG] adding file " << de.path() << endl;
             }
+
             if (output_header) {
                 string de_stem = de.path().filename().string();
-                std::replace(de_stem.begin(), de_stem.end(), '.', '_');
-                ofhs << "\tNARC_" << stem << "_" << de_stem << " = " << (memberNo++) << ",\n";
+                replace(de_stem.begin(), de_stem.end(), '.', '_');
+
+                ofhs << "    NARC_" << stem << "_" << de_stem << " = " << (memberNo++) << ",\n";
             }
+
             fatEntries.push_back(FileAllocationTableEntry {
                 .Start = 0x0,
                 .End = 0x0,
@@ -227,8 +263,13 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
             fatEntries.back().End = fatEntries.back().Start + static_cast<uint32_t>(file_size(de));
         }
     }
+
     if (output_header) {
-        ofhs << "};\n\n#endif //NARC_" << stem_upper << "_NAIX_\n";
+        // clang-format off
+        ofhs << "};\n"
+                "\n"
+                "#endif //NARC_" << stem_upper << "_NAIX_\n";
+        // clang-format on
     }
 
     FileAllocationTable fat {
@@ -240,8 +281,7 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
 
     map<fs::path, string> subTables;
     vector<fs::path> paths;
-
-    directoryCounter = 0;
+    uint16_t directoryCounter = 0;
 
     for (const auto &de : KnarcOrderDirectoryIterator(directory, true)) {
         // clang-format off
