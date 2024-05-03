@@ -10,9 +10,11 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <ranges>
 #include <sstream>
 #include <stack>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "fnmatch.h"
@@ -25,97 +27,26 @@ namespace fs = std::experimental::filesystem;
 namespace fs = std::filesystem;
 #endif
 
+#define FATB_ID 0x46415442
+#define FNTB_ID 0x464E5442
+#define FIMG_ID 0x46494D47
+#define NARC_ID 0x4352414E
+
+#define LE_BYTE_ORDER 0xFFFE
+
+#define NARC_V0 0x0000
+#define NARC_V1 0x0100
+
+#define NARC_CHUNK_COUNT 0x03
+
 using namespace std;
 
 extern bool debug;
-extern bool build_fnt;
+extern bool pack_with_fnt;
 extern bool output_header;
+extern bool use_v0;
 
 namespace {
-
-void AlignDword(ofstream &ofs, uint8_t padding_byte)
-{
-    if ((ofs.tellp() % 4) != 0) {
-        for (int i = 4 - (ofs.tellp() % 4); i-- > 0;) {
-            ofs.write(reinterpret_cast<char *>(&padding_byte), sizeof(uint8_t));
-        }
-    }
-}
-
-vector<fs::directory_entry> KnarcOrderDirectoryIterator(const fs::path &path, bool recursive)
-{
-    vector<fs::directory_entry> ordered_files;
-    vector<fs::directory_entry> unordered_files;
-
-    // open the order file
-    if (fs::exists(path / ".knarcorder")) {
-        ifstream order_file(path / ".knarcorder");
-        if (order_file) {
-            if (debug) {
-                cout << "[DEBUG] knarcorder file exists" << endl;
-            }
-
-            // read the filenames in the order file and add the corresponding directory entries to the ordered files vector
-            string filename;
-            while (std::getline(order_file, filename)) {
-                fs::path file_path = path / filename;
-                if (fs::exists(file_path)) {
-                    if (debug) {
-                        cout << "[DEBUG] knarcorder file: " << file_path << endl;
-                    }
-                    ordered_files.push_back(fs::directory_entry(file_path));
-                }
-            }
-        }
-    }
-
-    // if recursive flag is set, search for knarcorder files in subdirectories and process them recursively
-    if (recursive) {
-        for (auto &entry : fs::directory_iterator(path)) {
-            if (entry.is_directory()) {
-                vector<fs::directory_entry> subdirectory_files = KnarcOrderDirectoryIterator(entry.path(), true);
-                ordered_files.insert(
-                    ordered_files.end(),
-                    subdirectory_files.begin(),
-                    subdirectory_files.end()
-                );
-            }
-        }
-    }
-
-    // add the remaining files in alphabetical order
-    for (auto &entry : fs::directory_iterator(path)) {
-        // clang-format off
-        if (entry.is_regular_file()
-                && entry.path().filename() != ".knarcorder"
-                && find(ordered_files.begin(), ordered_files.end(), entry) == ordered_files.end()) {
-            unordered_files.push_back(entry);
-        }
-        // clang-format on
-    }
-
-    // clang-format off
-    sort(unordered_files.begin(), unordered_files.end(),
-        [](const fs::directory_entry &a, const fs::directory_entry &b) {
-            string aStr = a.path().filename().string();
-            string bStr = b.path().filename().string();
-
-            for (size_t i = 0; i < aStr.size(); ++i) {
-                aStr[i] = tolower(aStr[i]);
-            }
-
-            for (size_t i = 0; i < bStr.size(); ++i) {
-                bStr[i] = tolower(bStr[i]);
-            }
-
-            return aStr < bStr;
-        }
-    );
-    // clang-format on
-
-    ordered_files.insert(ordered_files.end(), unordered_files.begin(), unordered_files.end());
-    return ordered_files;
-}
 
 inline void ltrim(std::string &s)
 {
@@ -151,8 +82,36 @@ inline void trim(std::string &s)
     rtrim(s);
 }
 
+inline bool read_spec_file(const fs::path &spec_fname, vector<string> &patterns)
+{
+    if (spec_fname.empty()) {
+        return true;
+    }
+
+    ifstream ifs(spec_fname);
+    if (!ifs.good()) {
+        if (debug) {
+            cout << "[DEBUG] Could not open spec file " << spec_fname << endl;
+        }
+
+        return false;
+    }
+
+    string line;
+    while (getline(ifs, line)) {
+        trim(line);
+        if (!line.empty()) {
+            patterns.push_back(line);
+        }
+    }
+
+    return true;
+}
+
 class WildcardVector : public vector<string> {
   public:
+    WildcardVector() : vector<string>() {}
+
     WildcardVector(fs::path fp)
     {
         if (!fs::exists(fp)) {
@@ -171,9 +130,9 @@ class WildcardVector : public vector<string> {
         }
     }
 
-    bool matches(string fp)
+    bool matches(string fp) const
     {
-        for (string &pattern : *this) {
+        for (const string &pattern : *this) {
             if (fnmatch(pattern.c_str(), fp.c_str(), FNM_PERIOD) == 0) {
                 return true;
             }
@@ -182,31 +141,286 @@ class WildcardVector : public vector<string> {
     }
 };
 
+vector<fs::directory_entry> find_files(const fs::path &dir, const WildcardVector &ignore_patterns, const WildcardVector &keep_patterns);
+vector<fs::directory_entry> find_files(const fs::path &dir, const WildcardVector &ignore_patterns, const WildcardVector &keep_patterns, vector<string> &order_spec, const bool explicit_order = true);
+
+void align_dword(ofstream &ofs, uint8_t padding_byte)
+{
+    if ((ofs.tellp() % 4) != 0) {
+        for (int i = 4 - (ofs.tellp() % 4); i-- > 0;) {
+            ofs.write(reinterpret_cast<char *>(&padding_byte), sizeof(uint8_t));
+        }
+    }
+}
+
+/*
+ * Find path entries recursively beneath a given directory, sorting them in
+ * a particular order.
+ *
+ * - Files which match a pattern to be ignored will be excluded from the output.
+ * - Files which match a pattern to be kept or which are included in the order
+ * specification will always be included.
+ * - Files which are not included in the order specification will be added at
+ * the end of the output and are sorted in lexicographical order.
+ */
+vector<fs::directory_entry> find_files(const fs::path &dir, const WildcardVector &ignore_patterns, const WildcardVector &keep_patterns, vector<string> &order_spec, const bool explicit_order)
+{
+    vector<fs::directory_entry> ordered_files, unordered_files;
+    for (auto &entry : order_spec) {
+        fs::path file_path = dir / entry;
+
+        // clang-format off
+        if (fs::exists(file_path)
+                && (!ignore_patterns.matches(file_path)
+                    || keep_patterns.matches(file_path))) {
+            ordered_files.push_back(fs::directory_entry(file_path));
+        }
+        // clang-format on
+    }
+
+    // find files in subdirectories
+    // clear out the order_spec so that files are not double-added for
+    // an explicit ordering
+    order_spec.clear();
+    for (auto &entry : fs::directory_iterator(dir)) {
+        if (entry.is_directory()) {
+            // if the order was not explicitly specified, invoke the leading function
+            // which will parse a .knarcorder file at the next entry
+            vector<fs::directory_entry> subdir_files = explicit_order
+                                                         ? find_files(entry.path(), ignore_patterns, keep_patterns, order_spec)
+                                                         : find_files(entry.path(), ignore_patterns, keep_patterns);
+        }
+    }
+
+    // add remaining files
+    for (auto &entry : fs::directory_iterator(dir)) {
+        // clang-format off
+        if (entry.is_regular_file()
+                && entry.path().filename() != ".knarcorder"
+                && find(ordered_files.begin(), ordered_files.end(), entry) == ordered_files.end()) {
+            unordered_files.push_back(entry);
+        }
+        // clang-format on
+    }
+
+    // clang-format off
+    sort(unordered_files.begin(), unordered_files.end(),
+        [](const fs::directory_entry &a, const fs::directory_entry &b) {
+            string a_str = a.path().filename().string();
+            string b_str = b.path().filename().string();
+
+            for (size_t i = 0; i < a_str.size(); ++i) {
+                a_str[i] = tolower(a_str[i]);
+            }
+
+            for (size_t i = 0; i < b_str.size(); ++i) {
+                b_str[i] = tolower(b_str[i]);
+            }
+
+            return a_str < b_str;
+        }
+    );
+    // clang-format on
+
+    ordered_files.insert(ordered_files.end(), unordered_files.begin(), unordered_files.end());
+    return ordered_files;
+}
+
+vector<fs::directory_entry> find_files(const fs::path &dir, const WildcardVector &ignore_patterns, const WildcardVector &keep_patterns)
+{
+    vector<string> order_spec;
+
+    if (fs::exists(dir / ".knarcorder")) {
+        if (debug) {
+            cout << "[DEBUG] knarcorder file exists for " << dir << endl;
+        }
+
+        read_spec_file(dir / ".knarcorder", order_spec);
+    }
+
+    return find_files(dir, ignore_patterns, keep_patterns, order_spec, false);
+}
+
+tuple<narc::FileAllocationTable, vector<narc::FileAllocationTableEntry>> build_fat(vector<fs::directory_entry> &files, ofstream &header_ofs, const string &main_stem, const string &main_stem_upper)
+{
+    auto not_directory = [](fs::directory_entry &e) { return !fs::is_directory(e); };
+    vector<narc::FileAllocationTableEntry> fat_entries;
+    int member_idx = 0;
+
+    for (auto &entry : files | views::filter(not_directory)) {
+        uint32_t entry_start = fat_entries.empty()
+                                 ? 0
+                                 : fat_entries.back().End;
+        if (entry_start % 4 != 0) {
+            entry_start += 4 - (entry_start % 4);
+        }
+
+        uint32_t entry_end = entry_start + static_cast<uint32_t>(fs::file_size(entry));
+
+        fat_entries.push_back(narc::FileAllocationTableEntry {
+            .Start = entry_start,
+            .End = entry_end,
+        });
+
+        if (output_header) {
+            string entry_stem = entry.path().filename().string();
+            replace(entry_stem.begin(), entry_stem.end(), '.', '_');
+
+            header_ofs << "    NARC_" << main_stem << "_" << entry_stem << " = " << member_idx << ",\n";
+            member_idx++;
+        }
+    }
+
+    if (output_header) {
+        // clang-format off
+        header_ofs << "};\n"
+                      "\n"
+                      "#endif // NARC_" << main_stem_upper << "_NAIX_\n";
+        // clang-format on
+    }
+
+    return {
+        narc::FileAllocationTable {
+            .Id = FATB_ID,
+            .ChunkSize = static_cast<uint32_t>(sizeof(narc::FileAllocationTable) + ((uint32_t)fat_entries.size() * sizeof(narc::FileAllocationTableEntry))),
+            .FileCount = static_cast<uint16_t>(fat_entries.size()),
+            .Reserved = 0x0,
+        },
+        fat_entries,
+    };
+}
+
+uint16_t build_fnt_sub_entries(vector<fs::directory_entry> &files, map<fs::path, string> &sub_entries, vector<fs::path> &sub_paths)
+{
+    uint16_t num_dirs = 0;
+
+    for (const auto &file : files) {
+        const auto &file_path = file.path();
+        const auto &parent_path = file_path.parent_path();
+        const auto &filename = file_path.filename().string();
+        if (!sub_entries.count(parent_path)) {
+            sub_entries.insert({ parent_path, "" });
+            sub_paths.push_back(parent_path);
+        }
+
+        if (fs::is_directory(file)) {
+            num_dirs++;
+
+            sub_entries[parent_path] += static_cast<uint8_t>(0x80 + filename.size());
+            sub_entries[parent_path] += filename;
+            sub_entries[parent_path] += (0xF000 + num_dirs) & 0xFF;
+            sub_entries[parent_path] += (0xF000 + num_dirs) >> 8;
+        } else {
+            sub_entries[parent_path] += static_cast<uint8_t>(filename.size());
+            sub_entries[parent_path] += filename;
+        }
+
+        sub_entries[parent_path] += '\0';
+    }
+
+    return num_dirs;
+}
+
+typedef struct FileNameTableData {
+    narc::FileNameTable fnt;
+    vector<narc::FileNameTableEntry> fnt_entries;
+    map<fs::path, string> sub_entries;
+    vector<fs::path> sub_paths;
+} FileNameTableData;
+
+FileNameTableData build_fnt(vector<fs::directory_entry> &files)
+{
+    vector<narc::FileNameTableEntry> fnt_entries;
+    map<fs::path, string> sub_entries;
+    vector<fs::path> sub_paths;
+
+    if (pack_with_fnt) {
+        uint16_t num_dirs = build_fnt_sub_entries(files, sub_entries, sub_paths);
+
+        fnt_entries.push_back({
+            .Offset = static_cast<uint32_t>((num_dirs + 1) * sizeof(narc::FileNameTableEntry)),
+            .FirstFileId = 0x0,
+            .Utility = static_cast<uint16_t>(num_dirs + 1),
+        });
+
+        for (uint16_t i = 0; i < num_dirs; i++) {
+            auto &sub_entry = sub_entries[sub_paths[i]];
+            fnt_entries.push_back({
+                .Offset = static_cast<uint32_t>(fnt_entries.back().Offset + sub_entry.size()),
+                .FirstFileId = fnt_entries.back().FirstFileId,
+                .Utility = 0x0,
+            });
+
+            for (size_t j = 0; j < sub_entry.size() - 1; j++) {
+                if (static_cast<uint8_t>(sub_entry[j]) <= 0x7F) {
+                    j += static_cast<uint8_t>(sub_entry[j]);
+                    fnt_entries.back().FirstFileId++;
+                } else {
+                    j += static_cast<uint8_t>(sub_entry[j]) - 0x80 + 0x02;
+                }
+            }
+
+            fnt_entries.back().Utility = find(sub_paths.begin(), sub_paths.end(), sub_paths[i + 1].parent_path())
+                                       - sub_paths.begin() + 0xF000;
+        }
+    } else {
+        fnt_entries.push_back({
+            .Offset = 0x4,
+            .FirstFileId = 0x0,
+            .Utility = 0x1,
+        });
+    }
+
+    narc::FileNameTable fnt {
+        .Id = FNTB_ID,
+        .ChunkSize = static_cast<uint32_t>(sizeof(narc::FileNameTable) + (fnt_entries.size() * sizeof(narc::FileNameTableEntry))),
+    };
+
+    if (pack_with_fnt) {
+        for (const auto &sub_entry : sub_entries) {
+            fnt.ChunkSize += sub_entry.second.size();
+        }
+    }
+
+    if (fnt.ChunkSize % 4 != 0) {
+        fnt.ChunkSize += 4 - (fnt.ChunkSize % 4);
+    }
+
+    return {
+        fnt,
+        fnt_entries,
+        sub_entries,
+        sub_paths,
+    };
+}
+
 }; // namespace
 
-narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
+narc::NarcError narc::pack(const fs::path &dst_file, const fs::path &src_dir, const fs::path &order_file, const fs::path &ignore_file, const fs::path &keep_file)
 {
-    ofstream ofs(file_name, ios::binary);
-
+    ofstream ofs(dst_file, ios::binary);
     if (!ofs.good()) {
+        if (debug) {
+            cout << "[DEBUG] Could not open output file " << dst_file << endl;
+        }
+
         return NarcError::InvalidOutputFile;
     }
 
-    ofstream ofhs;
-    string stem, stem_upper;
-
     // Pikalax 29 May 2021
     // Output an includable header that enumerates the NARC contents
+    ofstream ofhs;
+    string stem, stem_upper;
     if (output_header) {
-        fs::path naixfname = file_name;
-        naixfname.replace_extension(".naix");
+        fs::path naix_fname = dst_file;
+        naix_fname.replace_extension(".naix");
 
-        ofhs.open(naixfname);
+        ofhs.open(naix_fname);
         if (!ofhs.good()) {
             return NarcError::InvalidOutputFile;
         }
 
-        stem = file_name.stem().string();
+        stem = dst_file.stem().string();
         transform(stem.begin(), stem.end(), stem_upper.begin(), ::toupper);
 
         // clang-format off
@@ -221,225 +435,97 @@ narc::NarcError narc::Pack(const fs::path &file_name, const fs::path &directory)
                 "enum {\n";
         // clang-format on
     }
-    vector<FileAllocationTableEntry> fatEntries;
 
-    WildcardVector ignore_patterns(directory / ".knarcignore");
-    ignore_patterns.push_back(".*ignore");
-    ignore_patterns.push_back(".*keep");
-    ignore_patterns.push_back(".*order");
-    WildcardVector keep_patterns(directory / ".knarckeep");
+    // build set of file-patterns to be ignored/kept
+    WildcardVector ignore_patterns, keep_patterns;
+    ignore_patterns.push_back("*.knarcignore");
+    ignore_patterns.push_back("*.knarckeep");
+    ignore_patterns.push_back("*.knarcorder");
 
-    int memberNo = 0;
-    for (const auto &de : KnarcOrderDirectoryIterator(directory, true)) {
-        if (is_directory(de)) {
-            continue;
-        }
-
-        if (keep_patterns.matches(de.path().filename().string()) || !ignore_patterns.matches(de.path().filename().string())) {
-            if (debug) {
-                cout << "[DEBUG] adding file " << de.path() << endl;
-            }
-
-            if (output_header) {
-                string de_stem = de.path().filename().string();
-                replace(de_stem.begin(), de_stem.end(), '.', '_');
-
-                ofhs << "    NARC_" << stem << "_" << de_stem << " = " << (memberNo++) << ",\n";
-            }
-
-            fatEntries.push_back(FileAllocationTableEntry {
-                .Start = 0x0,
-                .End = 0x0,
-            });
-
-            if (fatEntries.size() > 1) {
-                fatEntries.back().Start = fatEntries.rbegin()[1].End;
-
-                if ((fatEntries.rbegin()[1].End % 4) != 0) {
-                    fatEntries.back().Start += 4 - (fatEntries.rbegin()[1].End % 4);
-                }
-            }
-
-            fatEntries.back().End = fatEntries.back().Start + static_cast<uint32_t>(file_size(de));
-        }
+    if (!read_spec_file(ignore_file, ignore_patterns) || !read_spec_file(keep_file, keep_patterns)) {
+        return NarcError::InvalidInputFile;
     }
 
-    if (output_header) {
-        // clang-format off
-        ofhs << "};\n"
-                "\n"
-                "#endif //NARC_" << stem_upper << "_NAIX_\n";
-        // clang-format on
-    }
-
-    FileAllocationTable fat {
-        .Id = 0x46415442, // BTAF
-        .ChunkSize = static_cast<uint32_t>(sizeof(FileAllocationTable) + ((uint32_t)fatEntries.size() * sizeof(FileAllocationTableEntry))),
-        .FileCount = static_cast<uint16_t>(fatEntries.size()),
-        .Reserved = 0x0,
-    };
-
-    map<fs::path, string> subTables;
-    vector<fs::path> paths;
-    uint16_t directoryCounter = 0;
-
-    for (const auto &de : KnarcOrderDirectoryIterator(directory, true)) {
-        // clang-format off
-        if (!subTables.count(de.path().parent_path())
-                && (keep_patterns.matches(de.path().filename().string())
-                    || !ignore_patterns.matches(de.path().filename().string()))) {
-            subTables.insert({ de.path().parent_path(), "" });
-            paths.push_back(de.path().parent_path());
-        }
-        // clang-format on
-
-        if (is_directory(de)) {
-            ++directoryCounter;
-
-            subTables[de.path().parent_path()] += static_cast<uint8_t>(0x80 + de.path().filename().string().size());
-            subTables[de.path().parent_path()] += de.path().filename().string();
-            subTables[de.path().parent_path()] += (0xF000 + directoryCounter) & 0xFF;
-            subTables[de.path().parent_path()] += (0xF000 + directoryCounter) >> 8;
-        } else if (keep_patterns.matches(de.path().filename().string()) || !ignore_patterns.matches(de.path().filename().string())) {
-            subTables[de.path().parent_path()] += static_cast<uint8_t>(de.path().filename().string().size());
-            subTables[de.path().parent_path()] += de.path().filename().string();
-        }
-    }
-
-    for (auto &subTable : subTables) {
-        subTable.second += '\0';
-    }
-
-    vector<FileNameTableEntry> fntEntries;
-
-    if (build_fnt) {
-        fntEntries.push_back(
-            {
-                .Offset = static_cast<uint32_t>((directoryCounter + 1) * sizeof(FileNameTableEntry)),
-                .FirstFileId = 0x0,
-                .Utility = static_cast<uint16_t>(directoryCounter + 1),
-            }
-        );
-
-        for (uint16_t i = 0; i < directoryCounter; ++i) {
-            fntEntries.push_back(
-                {
-                    .Offset = static_cast<uint32_t>(fntEntries.back().Offset + subTables[paths[i]].size()),
-                    .FirstFileId = fntEntries.back().FirstFileId,
-                    .Utility = 0x0,
-                }
-            );
-
-            for (size_t j = 0; j < (subTables[paths[i]].size() - 1); ++j) {
-                if (static_cast<uint8_t>(subTables[paths[i]][j]) <= 0x7F) {
-                    j += static_cast<uint8_t>(subTables[paths[i]][j]);
-                    ++fntEntries.back().FirstFileId;
-                } else {
-                    j += static_cast<uint8_t>(subTables[paths[i]][j]) - 0x80 + 0x2;
-                }
-            }
-
-            fntEntries.back().Utility = 0xF000 + (find(paths.begin(), paths.end(), paths[i + 1].parent_path()) - paths.begin());
-        }
+    // find files to be included in the packed NARC
+    vector<fs::directory_entry> files;
+    if (order_file.empty()) {
+        files = find_files(src_dir, ignore_patterns, keep_patterns);
     } else {
-        fntEntries.push_back(
-            {
-                .Offset = 0x4,
-                .FirstFileId = 0x0,
-                .Utility = 0x1,
-            }
-        );
-    }
-
-    FileNameTable fnt {
-        .Id = 0x464E5442, // BTNF
-        .ChunkSize = static_cast<uint32_t>(sizeof(FileNameTable) + (fntEntries.size() * sizeof(FileNameTableEntry))),
-    };
-
-    if (build_fnt) {
-        for (const auto &subTable : subTables) {
-            fnt.ChunkSize += subTable.second.size();
+        vector<string> order_spec;
+        if (!read_spec_file(order_file, order_spec)) {
+            return NarcError::InvalidInputFile;
         }
+
+        files = find_files(src_dir, ignore_patterns, keep_patterns, order_spec);
     }
 
-    if ((fnt.ChunkSize % 4) != 0) {
-        fnt.ChunkSize += 4 - (fnt.ChunkSize % 4);
-    }
+    auto [fat, fat_entries] = build_fat(files, ofhs, stem, stem_upper);
+    auto [fnt, fnt_entries, sub_entries, sub_paths] = build_fnt(files);
 
     FileImages fi {
-        .Id = 0x46494D47, // GMIF
-        .ChunkSize = static_cast<uint32_t>(sizeof(FileImages) + (fatEntries.empty() ? 0 : fatEntries.back().End)),
+        .Id = FIMG_ID,
+        .ChunkSize = static_cast<uint32_t>(sizeof(FileImages) + (fat_entries.empty() ? 0 : fat_entries.back().End)),
     };
 
-    if ((fi.ChunkSize % 4) != 0) {
+    if (fi.ChunkSize % 4 != 0) {
         fi.ChunkSize += 4 - (fi.ChunkSize % 4);
     }
 
     Header header {
-        .Id = 0x4352414E, // NARC
-        .ByteOrderMark = 0xFFFE,
-        .Version = 0x100,
+        .Id = NARC_ID,
+        .ByteOrderMark = LE_BYTE_ORDER,
+        .Version = static_cast<uint16_t>(use_v0 ? NARC_V0 : NARC_V1),
         .FileSize = static_cast<uint32_t>(sizeof(Header) + fat.ChunkSize + fnt.ChunkSize + fi.ChunkSize),
         .ChunkSize = sizeof(Header),
-        .ChunkCount = 0x3,
+        .ChunkCount = NARC_CHUNK_COUNT,
     };
 
     ofs.write(reinterpret_cast<char *>(&header), sizeof(Header));
-    ofs.write(reinterpret_cast<char *>(&fat), sizeof(FileAllocationTable));
 
-    for (auto &entry : fatEntries) {
+    ofs.write(reinterpret_cast<char *>(&fat), sizeof(FileAllocationTable));
+    for (auto &entry : fat_entries) {
         ofs.write(reinterpret_cast<char *>(&entry), sizeof(FileAllocationTableEntry));
     }
 
     ofs.write(reinterpret_cast<char *>(&fnt), sizeof(FileNameTable));
-
-    for (auto &entry : fntEntries) {
+    for (auto &entry : fnt_entries) {
         ofs.write(reinterpret_cast<char *>(&entry), sizeof(FileNameTableEntry));
     }
 
-    if (build_fnt) {
-        for (const auto &path : paths) {
-            ofs << subTables[path];
+    if (pack_with_fnt) {
+        for (const auto &sub_path : sub_paths) {
+            ofs << sub_entries[sub_path];
         }
     }
 
-    AlignDword(ofs, 0xFF);
+    align_dword(ofs, 0xFF);
 
     ofs.write(reinterpret_cast<char *>(&fi), sizeof(FileImages));
-
-    for (const auto &de : KnarcOrderDirectoryIterator(directory, true)) {
-        if (is_directory(de)) {
+    for (const auto &entry : files) {
+        if (is_directory(entry)) {
             continue;
         }
 
-        if (!(keep_patterns.matches(de.path().filename().string()) || !ignore_patterns.matches(de.path().filename().string()))) {
-            continue;
-        }
-
-        ifstream ifs(de.path(), ios::binary | ios::ate);
-
+        ifstream ifs(entry.path(), ios::binary | ios::ate);
         if (!ifs.good()) {
             return NarcError::InvalidInputFile;
         }
 
-        streampos length = ifs.tellg();
-        unique_ptr<char[]> buffer = make_unique<char[]>(static_cast<unsigned int>(length));
+        streampos len = ifs.tellg();
+        unique_ptr<char[]> buf = make_unique<char[]>(static_cast<unsigned int>(len));
 
         ifs.seekg(0);
-        ifs.read(buffer.get(), length);
-
-        ofs.write(buffer.get(), length);
-
-        AlignDword(ofs, 0xFF);
+        ifs.read(buf.get(), len);
+        ofs.write(buf.get(), len);
+        align_dword(ofs, 0xFF);
     }
 
     return NarcError::None;
 }
 
-narc::NarcError narc::Unpack(const fs::path &file_name, const fs::path &directory)
+narc::NarcError narc::unpack(const fs::path &src_file, const fs::path &dst_dir)
 {
-    ifstream ifs(file_name, ios::binary);
-
+    ifstream ifs(src_file, ios::binary);
     if (!ifs.good()) {
         return NarcError::InvalidInputFile;
     }
@@ -447,182 +533,180 @@ narc::NarcError narc::Unpack(const fs::path &file_name, const fs::path &director
     Header header;
     ifs.read(reinterpret_cast<char *>(&header), sizeof(Header));
 
-    if (header.Id != 0x4352414E) {
+    if (header.Id != NARC_ID) {
         return NarcError::InvalidHeaderId;
     }
-    if (header.ByteOrderMark != 0xFFFE) {
+
+    if (header.ByteOrderMark != LE_BYTE_ORDER) {
         return NarcError::InvalidByteOrderMark;
     }
-    if ((header.Version != 0x0100) && (header.Version != 0x0000)) {
+
+    if (header.Version != NARC_V1 && header.Version != NARC_V0) {
         return NarcError::InvalidVersion;
     }
-    if (header.ChunkSize != 0x10) {
+
+    if (header.ChunkSize != sizeof(Header)) {
         return NarcError::InvalidHeaderSize;
     }
-    if (header.ChunkCount != 0x3) {
+
+    if (header.ChunkCount != NARC_CHUNK_COUNT) {
         return NarcError::InvalidChunkCount;
     }
 
     FileAllocationTable fat;
     ifs.read(reinterpret_cast<char *>(&fat), sizeof(FileAllocationTable));
 
-    if (fat.Id != 0x46415442) {
+    if (fat.Id != FATB_ID) {
         return NarcError::InvalidFileAllocationTableId;
     }
-    if (fat.Reserved != 0x0) {
+
+    if (fat.Reserved != 0x00) {
         return NarcError::InvalidFileAllocationTableReserved;
     }
 
-    unique_ptr<FileAllocationTableEntry[]> fatEntries = make_unique<FileAllocationTableEntry[]>(fat.FileCount);
-
-    for (uint16_t i = 0; i < fat.FileCount; ++i) {
-        ifs.read(reinterpret_cast<char *>(&fatEntries.get()[i]), sizeof(FileAllocationTableEntry));
+    unique_ptr<FileAllocationTableEntry[]> fat_entries = make_unique<FileAllocationTableEntry[]>(fat.FileCount);
+    for (uint16_t i = 0; i < fat.FileCount; i++) {
+        ifs.read(reinterpret_cast<char *>(&fat_entries.get()[i]), sizeof(FileAllocationTableEntry));
     }
 
     FileNameTable fnt;
-    vector<FileNameTableEntry> FileNameTableEntries;
     ifs.read(reinterpret_cast<char *>(&fnt), sizeof(FileNameTable));
 
-    if (fnt.Id != 0x464E5442) {
+    if (fnt.Id != FNTB_ID) {
         return NarcError::InvalidFileNameTableId;
     }
 
-    vector<FileNameTableEntry> fntEntries;
-
+    uint32_t fnt_entries_start = header.ChunkSize + fat.ChunkSize + sizeof(FileNameTable);
+    vector<FileNameTableEntry> fnt_entries;
     do {
-        fntEntries.push_back(FileNameTableEntry());
-
-        ifs.read(reinterpret_cast<char *>(&fntEntries.back().Offset), sizeof(uint32_t));
-        ifs.read(reinterpret_cast<char *>(&fntEntries.back().FirstFileId), sizeof(uint16_t));
-        ifs.read(reinterpret_cast<char *>(&fntEntries.back().Utility), sizeof(uint16_t));
-    } while (static_cast<uint32_t>(ifs.tellg()) < (header.ChunkSize + fat.ChunkSize + sizeof(FileNameTable) + fntEntries[0].Offset));
+        FileNameTableEntry fnt_entry;
+        ifs.read(reinterpret_cast<char *>(&fnt_entry), sizeof(FileNameTableEntry));
+        fnt_entries.push_back(fnt_entry);
+    } while (static_cast<uint32_t>(ifs.tellg()) < fnt_entries_start + fnt_entries[0].Offset);
 
     unique_ptr<string[]> file_names = make_unique<string[]>(0xFFFF);
+    for (size_t i = 0; i < fnt_entries.size(); i++) {
+        ifs.seekg(static_cast<uint64_t>(fnt_entries_start) + fnt_entries[i].Offset);
 
-    for (size_t i = 0; i < fntEntries.size(); ++i) {
-        ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + sizeof(FileNameTable) + fntEntries[i].Offset);
-
-        uint16_t fileId = 0x0000;
-
-        for (uint8_t length = 0x80; length != 0x00; ifs.read(reinterpret_cast<char *>(&length), sizeof(uint8_t))) {
-            if (length <= 0x7F) {
-                for (uint8_t j = 0; j < length; ++j) {
+        uint16_t file_id = 0;
+        for (uint8_t len = 0x80; len != 0x00; ifs.read(reinterpret_cast<char *>(&len), sizeof(uint8_t))) {
+            if (len <= 0x7F) {
+                for (uint8_t j = 0; j < len; j++) {
                     uint8_t c;
                     ifs.read(reinterpret_cast<char *>(&c), sizeof(uint8_t));
 
-                    file_names.get()[fntEntries[i].FirstFileId + fileId] += c;
+                    file_names.get()[fnt_entries[i].FirstFileId + file_id] += c;
                 }
 
-                ++fileId;
-            } else if (length == 0x80) {
-                // Reserved
+                file_id++;
+            } else if (len == 0x80) {
+                // reserved
             } else {
-                length -= 0x80;
-                string directoryName;
+                len -= 0x80;
+                string dir_name;
 
-                for (uint8_t j = 0; j < length; ++j) {
+                for (uint8_t j = 0; j < len; j++) {
                     uint8_t c;
                     ifs.read(reinterpret_cast<char *>(&c), sizeof(uint8_t));
 
-                    directoryName += c;
+                    dir_name += c;
                 }
 
-                uint16_t directoryId;
-                ifs.read(reinterpret_cast<char *>(&directoryId), sizeof(uint16_t));
+                uint16_t dir_id;
+                ifs.read(reinterpret_cast<char *>(&dir_id), sizeof(uint16_t));
 
-                file_names.get()[directoryId] = directoryName;
+                file_names.get()[dir_id] = dir_name;
             }
         }
     }
 
-    if ((ifs.tellg() % 4) != 0) {
+    if (ifs.tellg() % 4 != 0) {
         ifs.seekg(4 - (ifs.tellg() % 4), ios::cur);
     }
 
     FileImages fi;
     ifs.read(reinterpret_cast<char *>(&fi), sizeof(FileImages));
 
-    if (fi.Id != 0x46494D47) {
+    if (fi.Id != FIMG_ID) {
         return NarcError::InvalidFileImagesId;
     }
 
-    fs::create_directory(directory);
-    fs::current_path(directory);
+    fs::create_directory(dst_dir);
+    fs::current_path(dst_dir);
 
     if (fnt.ChunkSize == 0x10) {
-        for (uint16_t i = 0; i < fat.FileCount; ++i) {
-            ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + fnt.ChunkSize + 8 + fatEntries.get()[i].Start);
+        for (uint16_t i = 0; i < fat.FileCount; i++) {
+            ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + fnt.ChunkSize + 8 + fat_entries.get()[i].Start);
 
-            unique_ptr<char[]> buffer = make_unique<char[]>(fatEntries.get()[i].End - fatEntries.get()[i].Start);
-            ifs.read(buffer.get(), fatEntries.get()[i].End - fatEntries.get()[i].Start);
+            auto &fat_entry = fat_entries.get()[i];
+            const auto fat_entry_size = fat_entry.End - fat_entry.Start;
+            unique_ptr<char[]> buf = make_unique<char[]>(fat_entry_size);
+            ifs.read(buf.get(), fat_entry_size);
 
             ostringstream oss;
-            oss << file_name.stem().string() << "_" << setfill('0') << setw(8) << i << ".bin";
+            oss << src_file.stem().string() << "_" << setfill('0') << setw(8) << i << ".bin";
 
             ofstream ofs(oss.str(), ios::binary);
-
             if (!ofs.good()) {
-                ofs.close();
-
                 return NarcError::InvalidOutputFile;
             }
 
-            ofs.write(buffer.get(), fatEntries.get()[i].End - fatEntries.get()[i].Start);
+            ofs.write(buf.get(), fat_entry_size);
             ofs.close();
         }
     } else {
-        fs::path absolutePath = fs::absolute(fs::current_path());
+        fs::path absolute_path = fs::absolute(fs::current_path());
 
-        for (size_t i = 0; i < fntEntries.size(); ++i) {
-            fs::current_path(absolutePath);
-            stack<string> directories;
+        for (size_t i = 0; i < fnt_entries.size(); i++) {
+            fs::current_path(absolute_path);
+            stack<string> dirs;
+            auto &fnt_entry = fnt_entries[i];
 
-            for (uint16_t j = fntEntries[i].Utility; j > 0xF000; j = fntEntries[j - 0xF000].Utility) {
-                directories.push(file_names.get()[j]);
+            for (uint16_t j = fnt_entry.Utility; j > 0xF000; j = fnt_entries[j - 0xF000].Utility) {
+                dirs.push(file_names.get()[j]);
             }
 
-            for (; !directories.empty(); directories.pop()) {
-                fs::create_directory(directories.top());
-                fs::current_path(directories.top());
+            for (; !dirs.empty(); dirs.pop()) {
+                fs::create_directory(dirs.top());
+                fs::current_path(dirs.top());
             }
 
-            if (fntEntries[i].Utility >= 0xF000) {
+            if (fnt_entry.Utility >= 0xF000) {
                 fs::create_directory(file_names.get()[0xF000 + i]);
                 fs::current_path(file_names.get()[0xF000 + i]);
             }
 
-            ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + sizeof(FileNameTable) + fntEntries[i].Offset);
+            ifs.seekg(fnt_entries_start + fnt_entry.Offset);
 
-            uint16_t fileId = 0x0000;
+            uint16_t file_id = 0;
+            for (uint8_t len = 0x80; len != 0x00; ifs.read(reinterpret_cast<char *>(&len), sizeof(uint8_t))) {
+                if (len <= 0x7F) {
+                    streampos old_pos = ifs.tellg();
+                    auto &fat_entry = fat_entries.get()[fnt_entry.FirstFileId + file_id];
+                    auto &file_name = file_names.get()[fnt_entry.FirstFileId + file_id];
+                    const auto fat_entry_size = fat_entry.End - fat_entry.Start;
 
-            for (uint8_t length = 0x80; length != 0x00; ifs.read(reinterpret_cast<char *>(&length), sizeof(uint8_t))) {
-                if (length <= 0x7F) {
-                    streampos savedPosition = ifs.tellg();
+                    ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + fnt.ChunkSize + 8 + fat_entry.Start);
 
-                    ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + fnt.ChunkSize + 8 + fatEntries.get()[fntEntries[i].FirstFileId + fileId].Start);
+                    unique_ptr<char[]> buf = make_unique<char[]>(fat_entry_size);
+                    ifs.read(buf.get(), fat_entry_size);
 
-                    unique_ptr<char[]> buffer = make_unique<char[]>(fatEntries.get()[fntEntries[i].FirstFileId + fileId].End - fatEntries.get()[fntEntries[i].FirstFileId + fileId].Start);
-                    ifs.read(buffer.get(), fatEntries.get()[fntEntries[i].FirstFileId + fileId].End - fatEntries.get()[fntEntries[i].FirstFileId + fileId].Start);
-
-                    ofstream ofs(file_names.get()[fntEntries[i].FirstFileId + fileId], ios::binary);
-
+                    ofstream ofs(file_name, ios::binary);
                     if (!ofs.good()) {
-                        ofs.close();
-
                         return NarcError::InvalidOutputFile;
                     }
 
-                    ofs.write(buffer.get(), fatEntries.get()[fntEntries[i].FirstFileId + fileId].End - fatEntries.get()[fntEntries[i].FirstFileId + fileId].Start);
+                    ofs.write(buf.get(), fat_entry_size);
                     ofs.close();
 
-                    ifs.seekg(savedPosition);
-                    ifs.seekg(length, ios::cur);
+                    ifs.seekg(old_pos);
+                    ifs.seekg(len, ios::cur);
 
-                    ++fileId;
-                } else if (length == 0x80) {
-                    // Reserved
+                    file_id++;
+                } else if (len == 0x80) {
+                    // reserved
                 } else {
-                    ifs.seekg(static_cast<uint64_t>(length) - 0x80 + 0x2, ios::cur);
+                    ifs.seekg(static_cast<uint64_t>(len) - 0x80 + 0x02, ios::cur);
                 }
             }
         }

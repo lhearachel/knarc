@@ -30,8 +30,9 @@ std::string string_format(const std::string &format, Args... args)
 #define PROGRAM_VERSION_PATCHED string_format("{}.{}.{}", PROGRAM_VERSION_MAJOR, PROGRAM_VERSION_MINOR, PROGRAM_VERSION_PATCH)
 
 bool debug = false;
-bool build_fnt = false;
+bool pack_with_fnt = false;
 bool output_header = false;
+bool use_v0 = false;
 
 void PrintError(narc::NarcError error)
 {
@@ -93,6 +94,7 @@ void PrintError(narc::NarcError error)
 int main(int argc, char *argv[])
 {
     std::string directory, source, target;
+    std::string ignore_fname, keep_fname, order_fname;
     argparse::ArgumentParser program(PROGRAM_NAME, PROGRAM_VERSION);
 
     program.add_argument("-d", "--directory")
@@ -103,23 +105,45 @@ int main(int argc, char *argv[])
 
     auto &pack_or_unpack = program.add_mutually_exclusive_group();
     pack_or_unpack.add_argument("-p", "--pack")
-        .metavar("SOURCE")
-        .help("directory to be packed to a target NARC")
-        .store_into(source);
-    pack_or_unpack.add_argument("-u", "--unpack")
         .metavar("TARGET")
-        .help("directory to dump unpacked files from a source NARC")
+        .help("name of a NARC to be packed from DIRECTORY")
         .store_into(target);
+    pack_or_unpack.add_argument("-u", "--unpack")
+        .metavar("SOURCE")
+        .help("name of a NARC to be unpacked into DIRECTORY")
+        .store_into(source);
 
     program.add_argument("-f", "--filename-table")
         .help("build the filename table")
         .flag()
-        .store_into(build_fnt);
+        .store_into(pack_with_fnt);
 
     program.add_argument("-n", "--naix")
         .help("output a C-style .naix header")
         .flag()
         .store_into(output_header);
+
+    program.add_argument("-i", "--ignore")
+        .metavar("IGNORE_FILE")
+        .help("specify a file listing file-patterns to ignore for packing")
+        .store_into(ignore_fname);
+
+    program.add_argument("-k", "--keep")
+        .metavar("KEEP_FILE")
+        .help("specify a file listing file-patterns to keep during packing; "
+              "listed patterns override those matching patterns in IGNORE_FILE")
+        .store_into(keep_fname);
+
+    program.add_argument("-o", "--order")
+        .metavar("ORDER_FILE")
+        .help("specify a file listing order of files for packing; "
+              "listed files override those matching patterns in IGNORE_FILE")
+        .store_into(order_fname);
+
+    program.add_argument("-z", "--version-zero")
+        .help("output the NARC as version 0 spec")
+        .flag()
+        .store_into(use_v0);
 
     program.add_argument("--verbose")
         .help("output additional program messages")
@@ -136,16 +160,18 @@ int main(int argc, char *argv[])
 
     if (debug) {
         std::cout << "[DEBUG] directory: " << directory << std::endl;
-        std::cout << "[DEBUG] source:    " << source << std::endl;
         std::cout << "[DEBUG] target:    " << target << std::endl;
+        std::cout << "[DEBUG] source:    " << source << std::endl;
 
         std::cout << std::boolalpha;
-        std::cout << "[DEBUG] build filename table? " << build_fnt << std::endl;
+        std::cout << "[DEBUG] build filename table? " << pack_with_fnt << std::endl;
         std::cout << "[DEBUG] output NAIX header?   " << output_header << std::endl;
     }
 
-    narc::NarcOp op = target.empty() ? narc::Pack : narc::Unpack;
-    narc::NarcError err = op(source, directory);
+    narc::NarcError err = source.empty()
+                            ? narc::pack(target, directory, order_fname, ignore_fname, keep_fname)
+                            : narc::unpack(source, directory);
+
     if (err != narc::NarcError::None) {
         PrintError(err);
         std::exit(1);

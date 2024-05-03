@@ -66,9 +66,14 @@ struct FileImages {
     uint32_t ChunkSize;
 };
 
-typedef narc::NarcError (*NarcOp)(const fs::path &file_name, const fs::path &directory);
-
-extern narc::NarcError Pack(const fs::path &file_name, const fs::path &directory);
-extern narc::NarcError Unpack(const fs::path &file_name, const fs::path &directory);
+// clang-format off
+extern narc::NarcError pack(const fs::path &dst_file,
+                            const fs::path &src_dir,
+                            const fs::path &order_path = "",
+                            const fs::path &ignore_path = "",
+                            const fs::path &keep_path = "");
+extern narc::NarcError unpack(const fs::path &src_file,
+                              const fs::path &dst_dir);
+// clang-format on
 
 }; // namespace narc
