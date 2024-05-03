@@ -250,7 +250,7 @@ tuple<narc::FileAllocationTable, vector<narc::FileAllocationTableEntry>> build_f
     for (auto &entry : files | views::filter(not_directory)) {
         uint32_t entry_start = fat_entries.empty()
                                  ? 0
-                                 : fat_entries.back().End;
+                                 : fat_entries.back().end;
         if (entry_start % 4 != 0) {
             entry_start += 4 - (entry_start % 4);
         }
@@ -258,8 +258,8 @@ tuple<narc::FileAllocationTable, vector<narc::FileAllocationTableEntry>> build_f
         uint32_t entry_end = entry_start + static_cast<uint32_t>(fs::file_size(entry));
 
         fat_entries.push_back(narc::FileAllocationTableEntry {
-            .Start = entry_start,
-            .End = entry_end,
+            .start = entry_start,
+            .end = entry_end,
         });
 
         if (output_header) {
@@ -281,10 +281,10 @@ tuple<narc::FileAllocationTable, vector<narc::FileAllocationTableEntry>> build_f
 
     return {
         narc::FileAllocationTable {
-            .Id = FATB_ID,
-            .ChunkSize = static_cast<uint32_t>(sizeof(narc::FileAllocationTable) + ((uint32_t)fat_entries.size() * sizeof(narc::FileAllocationTableEntry))),
-            .FileCount = static_cast<uint16_t>(fat_entries.size()),
-            .Reserved = 0x0,
+            .id = FATB_ID,
+            .chunk_size = static_cast<uint32_t>(sizeof(narc::FileAllocationTable) + ((uint32_t)fat_entries.size() * sizeof(narc::FileAllocationTableEntry))),
+            .num_files = static_cast<uint16_t>(fat_entries.size()),
+            .reserved = 0x0,
         },
         fat_entries,
     };
@@ -338,52 +338,52 @@ FileNameTableData build_fnt(vector<fs::directory_entry> &files)
         uint16_t num_dirs = build_fnt_sub_entries(files, sub_entries, sub_paths);
 
         fnt_entries.push_back({
-            .Offset = static_cast<uint32_t>((num_dirs + 1) * sizeof(narc::FileNameTableEntry)),
-            .FirstFileId = 0x0,
-            .Utility = static_cast<uint16_t>(num_dirs + 1),
+            .offset = static_cast<uint32_t>((num_dirs + 1) * sizeof(narc::FileNameTableEntry)),
+            .first_file_id = 0x0,
+            .util = static_cast<uint16_t>(num_dirs + 1),
         });
 
         for (uint16_t i = 0; i < num_dirs; i++) {
             auto &sub_entry = sub_entries[sub_paths[i]];
             fnt_entries.push_back({
-                .Offset = static_cast<uint32_t>(fnt_entries.back().Offset + sub_entry.size()),
-                .FirstFileId = fnt_entries.back().FirstFileId,
-                .Utility = 0x0,
+                .offset = static_cast<uint32_t>(fnt_entries.back().offset + sub_entry.size()),
+                .first_file_id = fnt_entries.back().first_file_id,
+                .util = 0x0,
             });
 
             for (size_t j = 0; j < sub_entry.size() - 1; j++) {
                 if (static_cast<uint8_t>(sub_entry[j]) <= 0x7F) {
                     j += static_cast<uint8_t>(sub_entry[j]);
-                    fnt_entries.back().FirstFileId++;
+                    fnt_entries.back().first_file_id++;
                 } else {
                     j += static_cast<uint8_t>(sub_entry[j]) - 0x80 + 0x02;
                 }
             }
 
-            fnt_entries.back().Utility = find(sub_paths.begin(), sub_paths.end(), sub_paths[i + 1].parent_path())
+            fnt_entries.back().util = find(sub_paths.begin(), sub_paths.end(), sub_paths[i + 1].parent_path())
                                        - sub_paths.begin() + 0xF000;
         }
     } else {
         fnt_entries.push_back({
-            .Offset = 0x4,
-            .FirstFileId = 0x0,
-            .Utility = 0x1,
+            .offset = 0x4,
+            .first_file_id = 0x0,
+            .util = 0x1,
         });
     }
 
     narc::FileNameTable fnt {
-        .Id = FNTB_ID,
-        .ChunkSize = static_cast<uint32_t>(sizeof(narc::FileNameTable) + (fnt_entries.size() * sizeof(narc::FileNameTableEntry))),
+        .id = FNTB_ID,
+        .chunk_size = static_cast<uint32_t>(sizeof(narc::FileNameTable) + (fnt_entries.size() * sizeof(narc::FileNameTableEntry))),
     };
 
     if (pack_with_fnt) {
         for (const auto &sub_entry : sub_entries) {
-            fnt.ChunkSize += sub_entry.second.size();
+            fnt.chunk_size += sub_entry.second.size();
         }
     }
 
-    if (fnt.ChunkSize % 4 != 0) {
-        fnt.ChunkSize += 4 - (fnt.ChunkSize % 4);
+    if (fnt.chunk_size % 4 != 0) {
+        fnt.chunk_size += 4 - (fnt.chunk_size % 4);
     }
 
     return {
@@ -463,21 +463,21 @@ narc::NarcError narc::pack(const fs::path &dst_file, const fs::path &src_dir, co
     auto [fnt, fnt_entries, sub_entries, sub_paths] = build_fnt(files);
 
     FileImages fi {
-        .Id = FIMG_ID,
-        .ChunkSize = static_cast<uint32_t>(sizeof(FileImages) + (fat_entries.empty() ? 0 : fat_entries.back().End)),
+        .id = FIMG_ID,
+        .chunk_size = static_cast<uint32_t>(sizeof(FileImages) + (fat_entries.empty() ? 0 : fat_entries.back().end)),
     };
 
-    if (fi.ChunkSize % 4 != 0) {
-        fi.ChunkSize += 4 - (fi.ChunkSize % 4);
+    if (fi.chunk_size % 4 != 0) {
+        fi.chunk_size += 4 - (fi.chunk_size % 4);
     }
 
     Header header {
-        .Id = NARC_ID,
-        .ByteOrderMark = LE_BYTE_ORDER,
-        .Version = static_cast<uint16_t>(use_v0 ? NARC_V0 : NARC_V1),
-        .FileSize = static_cast<uint32_t>(sizeof(Header) + fat.ChunkSize + fnt.ChunkSize + fi.ChunkSize),
-        .ChunkSize = sizeof(Header),
-        .ChunkCount = NARC_CHUNK_COUNT,
+        .id = NARC_ID,
+        .endianness = LE_BYTE_ORDER,
+        .version = static_cast<uint16_t>(use_v0 ? NARC_V0 : NARC_V1),
+        .file_size = static_cast<uint32_t>(sizeof(Header) + fat.chunk_size + fnt.chunk_size + fi.chunk_size),
+        .chunk_size = sizeof(Header),
+        .num_chunks = NARC_CHUNK_COUNT,
     };
 
     ofs.write(reinterpret_cast<char *>(&header), sizeof(Header));
@@ -533,60 +533,60 @@ narc::NarcError narc::unpack(const fs::path &src_file, const fs::path &dst_dir)
     Header header;
     ifs.read(reinterpret_cast<char *>(&header), sizeof(Header));
 
-    if (header.Id != NARC_ID) {
+    if (header.id != NARC_ID) {
         return NarcError::InvalidHeaderId;
     }
 
-    if (header.ByteOrderMark != LE_BYTE_ORDER) {
+    if (header.endianness != LE_BYTE_ORDER) {
         return NarcError::InvalidByteOrderMark;
     }
 
-    if (header.Version != NARC_V1 && header.Version != NARC_V0) {
+    if (header.version != NARC_V1 && header.version != NARC_V0) {
         return NarcError::InvalidVersion;
     }
 
-    if (header.ChunkSize != sizeof(Header)) {
+    if (header.chunk_size != sizeof(Header)) {
         return NarcError::InvalidHeaderSize;
     }
 
-    if (header.ChunkCount != NARC_CHUNK_COUNT) {
+    if (header.num_chunks != NARC_CHUNK_COUNT) {
         return NarcError::InvalidChunkCount;
     }
 
     FileAllocationTable fat;
     ifs.read(reinterpret_cast<char *>(&fat), sizeof(FileAllocationTable));
 
-    if (fat.Id != FATB_ID) {
+    if (fat.id != FATB_ID) {
         return NarcError::InvalidFileAllocationTableId;
     }
 
-    if (fat.Reserved != 0x00) {
+    if (fat.reserved != 0x00) {
         return NarcError::InvalidFileAllocationTableReserved;
     }
 
-    unique_ptr<FileAllocationTableEntry[]> fat_entries = make_unique<FileAllocationTableEntry[]>(fat.FileCount);
-    for (uint16_t i = 0; i < fat.FileCount; i++) {
+    unique_ptr<FileAllocationTableEntry[]> fat_entries = make_unique<FileAllocationTableEntry[]>(fat.num_files);
+    for (uint16_t i = 0; i < fat.num_files; i++) {
         ifs.read(reinterpret_cast<char *>(&fat_entries.get()[i]), sizeof(FileAllocationTableEntry));
     }
 
     FileNameTable fnt;
     ifs.read(reinterpret_cast<char *>(&fnt), sizeof(FileNameTable));
 
-    if (fnt.Id != FNTB_ID) {
+    if (fnt.id != FNTB_ID) {
         return NarcError::InvalidFileNameTableId;
     }
 
-    uint32_t fnt_entries_start = header.ChunkSize + fat.ChunkSize + sizeof(FileNameTable);
+    uint32_t fnt_entries_start = header.chunk_size + fat.chunk_size + sizeof(FileNameTable);
     vector<FileNameTableEntry> fnt_entries;
     do {
         FileNameTableEntry fnt_entry;
         ifs.read(reinterpret_cast<char *>(&fnt_entry), sizeof(FileNameTableEntry));
         fnt_entries.push_back(fnt_entry);
-    } while (static_cast<uint32_t>(ifs.tellg()) < fnt_entries_start + fnt_entries[0].Offset);
+    } while (static_cast<uint32_t>(ifs.tellg()) < fnt_entries_start + fnt_entries[0].offset);
 
     unique_ptr<string[]> file_names = make_unique<string[]>(0xFFFF);
     for (size_t i = 0; i < fnt_entries.size(); i++) {
-        ifs.seekg(static_cast<uint64_t>(fnt_entries_start) + fnt_entries[i].Offset);
+        ifs.seekg(static_cast<uint64_t>(fnt_entries_start) + fnt_entries[i].offset);
 
         uint16_t file_id = 0;
         for (uint8_t len = 0x80; len != 0x00; ifs.read(reinterpret_cast<char *>(&len), sizeof(uint8_t))) {
@@ -595,7 +595,7 @@ narc::NarcError narc::unpack(const fs::path &src_file, const fs::path &dst_dir)
                     uint8_t c;
                     ifs.read(reinterpret_cast<char *>(&c), sizeof(uint8_t));
 
-                    file_names.get()[fnt_entries[i].FirstFileId + file_id] += c;
+                    file_names.get()[fnt_entries[i].first_file_id + file_id] += c;
                 }
 
                 file_id++;
@@ -627,19 +627,19 @@ narc::NarcError narc::unpack(const fs::path &src_file, const fs::path &dst_dir)
     FileImages fi;
     ifs.read(reinterpret_cast<char *>(&fi), sizeof(FileImages));
 
-    if (fi.Id != FIMG_ID) {
+    if (fi.id != FIMG_ID) {
         return NarcError::InvalidFileImagesId;
     }
 
     fs::create_directory(dst_dir);
     fs::current_path(dst_dir);
 
-    if (fnt.ChunkSize == 0x10) {
-        for (uint16_t i = 0; i < fat.FileCount; i++) {
-            ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + fnt.ChunkSize + 8 + fat_entries.get()[i].Start);
+    if (fnt.chunk_size == 0x10) {
+        for (uint16_t i = 0; i < fat.num_files; i++) {
+            ifs.seekg(static_cast<uint64_t>(header.chunk_size) + fat.chunk_size + fnt.chunk_size + 8 + fat_entries.get()[i].start);
 
             auto &fat_entry = fat_entries.get()[i];
-            const auto fat_entry_size = fat_entry.End - fat_entry.Start;
+            const auto fat_entry_size = fat_entry.end - fat_entry.start;
             unique_ptr<char[]> buf = make_unique<char[]>(fat_entry_size);
             ifs.read(buf.get(), fat_entry_size);
 
@@ -662,7 +662,7 @@ narc::NarcError narc::unpack(const fs::path &src_file, const fs::path &dst_dir)
             stack<string> dirs;
             auto &fnt_entry = fnt_entries[i];
 
-            for (uint16_t j = fnt_entry.Utility; j > 0xF000; j = fnt_entries[j - 0xF000].Utility) {
+            for (uint16_t j = fnt_entry.util; j > 0xF000; j = fnt_entries[j - 0xF000].util) {
                 dirs.push(file_names.get()[j]);
             }
 
@@ -671,22 +671,22 @@ narc::NarcError narc::unpack(const fs::path &src_file, const fs::path &dst_dir)
                 fs::current_path(dirs.top());
             }
 
-            if (fnt_entry.Utility >= 0xF000) {
+            if (fnt_entry.util >= 0xF000) {
                 fs::create_directory(file_names.get()[0xF000 + i]);
                 fs::current_path(file_names.get()[0xF000 + i]);
             }
 
-            ifs.seekg(fnt_entries_start + fnt_entry.Offset);
+            ifs.seekg(fnt_entries_start + fnt_entry.offset);
 
             uint16_t file_id = 0;
             for (uint8_t len = 0x80; len != 0x00; ifs.read(reinterpret_cast<char *>(&len), sizeof(uint8_t))) {
                 if (len <= 0x7F) {
                     streampos old_pos = ifs.tellg();
-                    auto &fat_entry = fat_entries.get()[fnt_entry.FirstFileId + file_id];
-                    auto &file_name = file_names.get()[fnt_entry.FirstFileId + file_id];
-                    const auto fat_entry_size = fat_entry.End - fat_entry.Start;
+                    auto &fat_entry = fat_entries.get()[fnt_entry.first_file_id + file_id];
+                    auto &file_name = file_names.get()[fnt_entry.first_file_id + file_id];
+                    const auto fat_entry_size = fat_entry.end - fat_entry.start;
 
-                    ifs.seekg(static_cast<uint64_t>(header.ChunkSize) + fat.ChunkSize + fnt.ChunkSize + 8 + fat_entry.Start);
+                    ifs.seekg(static_cast<uint64_t>(header.chunk_size) + fat.chunk_size + fnt.chunk_size + 8 + fat_entry.start);
 
                     unique_ptr<char[]> buf = make_unique<char[]>(fat_entry_size);
                     ifs.read(buf.get(), fat_entry_size);

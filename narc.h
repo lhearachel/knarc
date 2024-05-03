@@ -29,42 +29,42 @@ enum class NarcError {
     InvalidOutputFile
 };
 
-struct Header {
-    uint32_t Id;
-    uint16_t ByteOrderMark;
-    uint16_t Version;
-    uint32_t FileSize;
-    uint16_t ChunkSize;
-    uint16_t ChunkCount;
-};
+typedef struct Header {
+    uint32_t id;
+    uint16_t endianness;
+    uint16_t version;
+    uint32_t file_size;
+    uint16_t chunk_size;
+    uint16_t num_chunks;
+} Header;
 
-struct FileAllocationTable {
-    uint32_t Id;
-    uint32_t ChunkSize;
-    uint16_t FileCount;
-    uint16_t Reserved;
-};
+typedef struct FileAllocationTable {
+    uint32_t id;
+    uint32_t chunk_size;
+    uint16_t num_files;
+    uint16_t reserved;
+} FileAllocationTable;
 
-struct FileAllocationTableEntry {
-    uint32_t Start;
-    uint32_t End;
-};
+typedef struct FileAllocationTableEntry {
+    uint32_t start;
+    uint32_t end;
+} FileAllocationTableEntry;
 
-struct FileNameTable {
-    uint32_t Id;
-    uint32_t ChunkSize;
-};
+typedef struct FileNameTable {
+    uint32_t id;
+    uint32_t chunk_size;
+} FileNameTable;
 
-struct FileNameTableEntry {
-    uint32_t Offset;
-    uint16_t FirstFileId;
-    uint16_t Utility;
-};
+typedef struct FileNameTableEntry {
+    uint32_t offset;
+    uint16_t first_file_id;
+    uint16_t util;
+} FileNameTableEntry;
 
-struct FileImages {
-    uint32_t Id;
-    uint32_t ChunkSize;
-};
+typedef struct FileImages {
+    uint32_t id;
+    uint32_t chunk_size;
+} FileImages;
 
 // clang-format off
 extern narc::NarcError pack(const fs::path &dst_file,
