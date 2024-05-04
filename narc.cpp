@@ -173,7 +173,21 @@ vector<fs::directory_entry> find_files(const fs::path &dir, const WildcardVector
         if (fs::exists(file_path)
                 && (!ignore_patterns.matches(file_path)
                     || keep_patterns.matches(file_path))) {
-            ordered_files.push_back(fs::directory_entry(file_path));
+            if (ignore_patterns.matches(file_path) && !keep_patterns.matches(file_path)) {
+                if (debug) {
+                    cout << "[DEBUG] File exists but will be ignored: " << file_path << endl;
+                }
+            } else {
+                if (debug) {
+                    cout << "[DEBUG] Adding file from order spec: " << file_path << endl;
+                }
+
+                ordered_files.push_back(fs::directory_entry(file_path));
+            }
+        } else {
+            if (debug) {
+                cout << "[DEBUG] File from order spec does not exist: " << file_path << endl;
+            }
         }
         // clang-format on
     }
@@ -194,11 +208,24 @@ vector<fs::directory_entry> find_files(const fs::path &dir, const WildcardVector
 
     // add remaining files
     for (auto &entry : fs::directory_iterator(dir)) {
+        auto file_path = entry.path();
+        auto filename = file_path.filename();
+
         // clang-format off
         if (entry.is_regular_file()
-                && entry.path().filename() != ".knarcorder"
+                && filename != ".knarcorder"
                 && find(ordered_files.begin(), ordered_files.end(), entry) == ordered_files.end()) {
-            unordered_files.push_back(entry);
+            if (ignore_patterns.matches(filename) && !keep_patterns.matches(filename)) {
+                if (debug) {
+                    cout << "[DEBUG] File ignored: " << entry  << endl;
+                }
+            } else {
+                if (debug) {
+                    cout << "[DEBUG] Adding unordered file: " << entry << endl;
+                }
+
+                unordered_files.push_back(entry);
+            }
         }
         // clang-format on
     }
@@ -266,15 +293,14 @@ tuple<narc::FileAllocationTable, vector<narc::FileAllocationTableEntry>> build_f
             string entry_stem = entry.path().filename().string();
             replace(entry_stem.begin(), entry_stem.end(), '.', '_');
 
-            header_ofs << "    NARC_" << main_stem << "_" << entry_stem << " = " << member_idx << ",\n";
+            header_ofs << "#define NARC_" << main_stem << "_" << entry_stem << " " << member_idx << "\n";
             member_idx++;
         }
     }
 
     if (output_header) {
         // clang-format off
-        header_ofs << "};\n"
-                      "\n"
+        header_ofs << "\n"
                       "#endif // NARC_" << main_stem_upper << "_NAIX_\n";
         // clang-format on
     }
@@ -421,7 +447,9 @@ narc::NarcError narc::pack(const fs::path &dst_file, const fs::path &src_dir, co
         }
 
         stem = dst_file.stem().string();
-        transform(stem.begin(), stem.end(), stem_upper.begin(), ::toupper);
+        for (auto &c : stem) {
+            stem_upper += toupper(c);
+        }
 
         // clang-format off
         ofhs << "/*\n"
@@ -431,8 +459,7 @@ narc::NarcError narc::pack(const fs::path &dst_file, const fs::path &src_dir, co
                 "\n"
                 "#ifndef NARC_" << stem_upper << "_NAIX_\n"
                 "#define NARC_" << stem_upper << "_NAIX_\n"
-                "\n"
-                "enum {\n";
+                "\n";
         // clang-format on
     }
 
@@ -449,8 +476,16 @@ narc::NarcError narc::pack(const fs::path &dst_file, const fs::path &src_dir, co
     // find files to be included in the packed NARC
     vector<fs::directory_entry> files;
     if (order_file.empty()) {
+        if (debug) {
+            cout << "[DEBUG] Building file list using implicit .knarcorder" << endl;
+        }
+
         files = find_files(src_dir, ignore_patterns, keep_patterns);
     } else {
+        if (debug) {
+            cout << "[DEBUG] Building file list from explicit " << order_file << endl;
+        }
+
         vector<string> order_spec;
         if (!read_spec_file(order_file, order_spec)) {
             return NarcError::InvalidInputFile;
