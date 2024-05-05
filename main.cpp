@@ -97,6 +97,7 @@ int main(int argc, char *argv[])
     std::string directory, source, target;
     std::string ignore_fname, keep_fname, order_fname;
     argparse::ArgumentParser program(PROGRAM_NAME, PROGRAM_VERSION);
+    program.add_description("Utility for un/packing Nitro Archives for the Nintendo DS");
 
     program.add_argument("-d", "--directory")
         .metavar("DIRECTORY")
