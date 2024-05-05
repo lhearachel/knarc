@@ -33,6 +33,7 @@ bool debug = false;
 bool pack_with_fnt = false;
 bool output_header = false;
 bool use_v0 = false;
+bool prefix_header_entries = false;
 
 void PrintError(narc::NarcError error)
 {
@@ -122,6 +123,11 @@ int main(int argc, char *argv[])
         .help("output a C-style .naix header")
         .flag()
         .store_into(output_header);
+
+    program.add_argument("--prefix-header-entries")
+        .help("prefix entries in an output .naix header with TARGET; dependent on --naix")
+        .flag()
+        .store_into(prefix_header_entries);
 
     program.add_argument("-i", "--ignore")
         .metavar("IGNORE_FILE")

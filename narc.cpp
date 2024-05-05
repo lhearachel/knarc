@@ -45,6 +45,7 @@ extern bool debug;
 extern bool pack_with_fnt;
 extern bool output_header;
 extern bool use_v0;
+extern bool prefix_header_entries;
 
 namespace {
 
@@ -293,7 +294,11 @@ tuple<narc::FileAllocationTable, vector<narc::FileAllocationTableEntry>> build_f
             string entry_stem = entry.path().filename().string();
             replace(entry_stem.begin(), entry_stem.end(), '.', '_');
 
-            header_ofs << "#define NARC_" << main_stem << "_" << entry_stem << " " << member_idx << "\n";
+            header_ofs << "#define ";
+            if (prefix_header_entries) {
+                header_ofs << "NARC_" << main_stem << "_";
+            }
+            header_ofs << entry_stem << " " << member_idx << "\n";
             member_idx++;
         }
     }
