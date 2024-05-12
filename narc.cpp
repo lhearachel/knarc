@@ -425,7 +425,7 @@ FileNameTableData build_fnt(vector<fs::directory_entry> &files)
     };
 }
 
-}; // namespace
+} // namespace
 
 narc::NarcError narc::pack(const fs::path &dst_file, const fs::path &src_dir, const fs::path &order_file, const fs::path &ignore_file, const fs::path &keep_file)
 {

@@ -76,4 +76,4 @@ extern narc::NarcError unpack(const fs::path &src_file,
                               const fs::path &dst_dir);
 // clang-format on
 
-}; // namespace narc
+} // namespace narc
