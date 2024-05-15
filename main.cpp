@@ -1,7 +1,9 @@
 #include <cstdio>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 #include "argparse.hpp"
 #include "narc.h"
@@ -35,67 +37,15 @@ bool output_header = false;
 bool use_v0 = false;
 bool prefix_header_entries = false;
 
-void PrintError(narc::NarcError error)
-{
-    switch (error) {
-    case narc::NarcError::None:
-        std::cerr << "ERROR: No error???" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidInputFile:
-        std::cerr << "ERROR: Invalid input file" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidHeaderId:
-        std::cerr << "ERROR: Invalid header ID" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidByteOrderMark:
-        std::cerr << "ERROR: Invalid byte order mark" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidVersion:
-        std::cerr << "ERROR: Invalid NARC version" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidHeaderSize:
-        std::cerr << "ERROR: Invalid header size" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidChunkCount:
-        std::cerr << "ERROR: Invalid chunk count" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidFileAllocationTableId:
-        std::cerr << "ERROR: Invalid file allocation table ID" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidFileAllocationTableReserved:
-        std::cerr << "ERROR: Invalid file allocation table reserved section" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidFileNameTableId:
-        std::cerr << "ERROR: Invalid file name table ID" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidFileImagesId:
-        std::cerr << "ERROR: Invalid file images ID" << std::endl;
-        break;
-
-    case narc::NarcError::InvalidOutputFile:
-        std::cerr << "ERROR: Invalid output file" << std::endl;
-        break;
-
-    default:
-        std::cerr << "ERROR: Unknown error???" << std::endl;
-        break;
-    }
-}
+static void print_error(narc::NarcError error);
+static void load_response_file(const char *fname, std::vector<std::string> &args);
 
 int main(int argc, char *argv[])
 {
     std::string directory, source, target;
     std::string ignore_fname, keep_fname, order_fname;
+    std::vector<std::string> response_file_args;
+
     argparse::ArgumentParser program(PROGRAM_NAME, PROGRAM_VERSION);
     program.add_description("Utility for un/packing Nitro Archives for the Nintendo DS");
 
@@ -157,8 +107,17 @@ int main(int argc, char *argv[])
         .flag()
         .store_into(debug);
 
+    if (argc > 1 && argv[1][0] == '@') {
+        response_file_args.push_back(argv[0]);
+        load_response_file(argv[1], response_file_args);
+    }
+
     try {
-        program.parse_args(argc, argv);
+        if (response_file_args.empty()) {
+            program.parse_args(argc, argv);
+        } else {
+            program.parse_args(response_file_args);
+        }
     } catch (const std::exception &err) {
         std::cerr << err.what() << std::endl;
         std::cerr << program;
@@ -173,6 +132,10 @@ int main(int argc, char *argv[])
         std::cout << std::boolalpha;
         std::cout << "[DEBUG] build filename table? " << pack_with_fnt << std::endl;
         std::cout << "[DEBUG] output NAIX header?   " << output_header << std::endl;
+
+        std::cout << "[DEBUG] ignore file: " << ignore_fname << std::endl;
+        std::cout << "[DEBUG] keep file:   " << keep_fname << std::endl;
+        std::cout << "[DEBUG] order file:  " << order_fname << std::endl;
     }
 
     narc::NarcError err = source.empty()
@@ -180,9 +143,116 @@ int main(int argc, char *argv[])
                             : narc::unpack(source, directory);
 
     if (err != narc::NarcError::None) {
-        PrintError(err);
+        print_error(err);
         std::exit(1);
     }
 
     return 0;
 }
+
+inline void ltrim(std::string &s)
+{
+    // clang-format off
+    s.erase(
+        s.begin(),
+        find_if(s.begin(), s.end(),
+            [](unsigned char c) {
+                return !isspace(c);
+            }
+        )
+    );
+    // clang-format on
+}
+
+inline void rtrim(std::string &s)
+{
+    // clang-format off
+    s.erase(
+        find_if(s.rbegin(), s.rend(),
+            [](unsigned char c) {
+                return !isspace(c);
+            }
+        ).base(),
+        s.end()
+    );
+    // clang-format on
+}
+
+inline void trim(std::string &s)
+{
+    ltrim(s);
+    rtrim(s);
+}
+
+static void load_response_file(const char *fname, std::vector<std::string> &args)
+{
+    std::string fname_str(fname + 1);
+    std::ifstream ifs(fname_str);
+    if (!ifs.good()) {
+        throw std::invalid_argument("failed to read response file " + fname_str);
+    }
+
+    std::string arg;
+    while (std::getline(ifs, arg, ' ')) {
+        trim(arg);
+        args.push_back(arg);
+    }
+}
+
+static void print_error(narc::NarcError error)
+{
+    switch (error) {
+    case narc::NarcError::None:
+        std::cerr << "ERROR: No error???" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidInputFile:
+        std::cerr << "ERROR: Invalid input file" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidHeaderId:
+        std::cerr << "ERROR: Invalid header ID" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidByteOrderMark:
+        std::cerr << "ERROR: Invalid byte order mark" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidVersion:
+        std::cerr << "ERROR: Invalid NARC version" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidHeaderSize:
+        std::cerr << "ERROR: Invalid header size" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidChunkCount:
+        std::cerr << "ERROR: Invalid chunk count" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidFileAllocationTableId:
+        std::cerr << "ERROR: Invalid file allocation table ID" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidFileAllocationTableReserved:
+        std::cerr << "ERROR: Invalid file allocation table reserved section" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidFileNameTableId:
+        std::cerr << "ERROR: Invalid file name table ID" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidFileImagesId:
+        std::cerr << "ERROR: Invalid file images ID" << std::endl;
+        break;
+
+    case narc::NarcError::InvalidOutputFile:
+        std::cerr << "ERROR: Invalid output file" << std::endl;
+        break;
+
+    default:
+        std::cerr << "ERROR: Unknown error???" << std::endl;
+        break;
+    }
+}
+
