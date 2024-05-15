@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <fstream>
 #include <vector>
 
 #if (__cplusplus < 201703L)
@@ -72,6 +71,8 @@ extern narc::NarcError pack(const fs::path &dst_file,
                             const fs::path &order_path = "",
                             const fs::path &ignore_path = "",
                             const fs::path &keep_path = "");
+extern narc::NarcError pack(const fs::path &dst_file,
+                            const std::vector<std::string> &src_files);
 extern narc::NarcError unpack(const fs::path &src_file,
                               const fs::path &dst_dir);
 // clang-format on

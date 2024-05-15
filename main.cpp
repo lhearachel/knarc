@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
 {
     std::string directory, source, target;
     std::string ignore_fname, keep_fname, order_fname;
-    std::vector<std::string> response_file_args;
+    std::vector<std::string> response_file_args, input_files;
 
     argparse::ArgumentParser program(PROGRAM_NAME, PROGRAM_VERSION);
     program.add_description("Utility for un/packing Nitro Archives for the Nintendo DS");
@@ -52,10 +52,9 @@ int main(int argc, char *argv[])
     program.add_argument("-d", "--directory")
         .metavar("DIRECTORY")
         .help("directory to be packed or to dump unpacked files")
-        .required()
         .store_into(directory);
 
-    auto &pack_or_unpack = program.add_mutually_exclusive_group();
+    auto &pack_or_unpack = program.add_mutually_exclusive_group(false);
     pack_or_unpack.add_argument("-p", "--pack")
         .metavar("TARGET")
         .help("name of a NARC to be packed from DIRECTORY")
@@ -107,6 +106,12 @@ int main(int argc, char *argv[])
         .flag()
         .store_into(debug);
 
+    program.add_argument("files")
+        .metavar("FILES")
+        .help("list of files to pack into the destination NARC; if specified, -d, -i, -k, and -o will be ignored")
+        .nargs(argparse::nargs_pattern::any)
+        .store_into(input_files);
+
     if (argc > 1 && argv[1][0] == '@') {
         response_file_args.push_back(argv[0]);
         load_response_file(argv[1], response_file_args);
@@ -138,9 +143,23 @@ int main(int argc, char *argv[])
         std::cout << "[DEBUG] order file:  " << order_fname << std::endl;
     }
 
-    narc::NarcError err = source.empty()
-                            ? narc::pack(target, directory, order_fname, ignore_fname, keep_fname)
-                            : narc::unpack(source, directory);
+    narc::NarcError err;
+    if (source.empty()) {
+        if (input_files.empty()) {
+            if (directory.empty()) {
+                std::cerr << "-d: required" << std::endl;
+                std::cerr << program << std::endl;
+                std::exit(1);
+            }
+
+            err = narc::pack(target, directory, order_fname, ignore_fname, keep_fname);
+        } else {
+            std::cout << "packing from input files" << std::endl;
+            err = narc::pack(target, input_files);
+        }
+    } else {
+        err = narc::unpack(source, directory);
+    }
 
     if (err != narc::NarcError::None) {
         print_error(err);
