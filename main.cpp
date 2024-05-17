@@ -52,26 +52,25 @@ int main(int argc, char *argv[])
     // knarc pack
     argparse::ArgumentParser pack_command("pack");
     pack_command.add_description("Pack a list of files or a directory into a NARC");
-    pack_command.add_argument("-f", "--filename-table")
-        .help("build a filename table")
-        .flag()
-        .store_into(pack_with_fnt);
-    pack_command.add_argument("-n", "--naix")
-        .help("output a C-style .naix header")
-        .flag()
-        .store_into(output_header);
-    pack_command.add_argument("--prefix-header-entries")
-        .help("prefix entries in an output .naix header with TARGET; dependent on --naix")
-        .flag()
-        .store_into(prefix_header_entries);
-    pack_command.add_argument("-z", "--version-zero")
-        .help("output the NARC as version 0 spec")
-        .flag()
-        .store_into(use_v0);
-
     // knarc pack files
     argparse::ArgumentParser pack_files_command("files");
     pack_files_command.add_description("Pack a list of files into NARC");
+    pack_files_command.add_argument("-f", "--filename-table")
+        .help("build a filename table")
+        .flag()
+        .store_into(pack_with_fnt);
+    pack_files_command.add_argument("-n", "--naix")
+        .help("output a C-style .naix header")
+        .flag()
+        .store_into(output_header);
+    pack_files_command.add_argument("--prefix-header-entries")
+        .help("prefix entries in an output .naix header with TARGET; dependent on --naix")
+        .flag()
+        .store_into(prefix_header_entries);
+    pack_files_command.add_argument("-z", "--version-zero")
+        .help("output the NARC as version 0 spec")
+        .flag()
+        .store_into(use_v0);
     pack_files_command.add_argument("target")
         .metavar("NARC")
         .help("name of the packed NARC")
@@ -81,23 +80,28 @@ int main(int argc, char *argv[])
         .metavar("FILES")
         .help("list of one or more files to be packed")
         .remaining()
-        .nargs(argparse::nargs_pattern::at_least_one)
         .store_into(input_files);
     pack_command.add_subparser(pack_files_command);
 
     // knarc pack dir
     argparse::ArgumentParser pack_dir_command("dir");
     pack_dir_command.add_description("Pack DIRECTORY's contents into NARC");
-    pack_dir_command.add_argument("target")
-        .metavar("NARC")
-        .help("name of the packed NARC")
-        .required()
-        .store_into(target);
-    pack_dir_command.add_argument("directory")
-        .metavar("DIRECTORY")
-        .help("directory to be packed")
-        .required()
-        .store_into(directory);
+    pack_dir_command.add_argument("-f", "--filename-table")
+        .help("build a filename table")
+        .flag()
+        .store_into(pack_with_fnt);
+    pack_dir_command.add_argument("-n", "--naix")
+        .help("output a C-style .naix header")
+        .flag()
+        .store_into(output_header);
+    pack_dir_command.add_argument("--prefix-header-entries")
+        .help("prefix entries in an output .naix header with TARGET; dependent on --naix")
+        .flag()
+        .store_into(prefix_header_entries);
+    pack_dir_command.add_argument("-z", "--version-zero")
+        .help("output the NARC as version 0 spec")
+        .flag()
+        .store_into(use_v0);
     pack_dir_command.add_argument("-i", "--ignore")
         .metavar("IGNORE_FILE")
         .help("specify a file listing file-patterns to ignore for packing")
@@ -112,6 +116,16 @@ int main(int argc, char *argv[])
         .help("specify a file listing order of files for packing; "
               "listed files override those matching patterns in IGNORE_FILE")
         .store_into(order_fname);
+    pack_dir_command.add_argument("target")
+        .metavar("NARC")
+        .help("name of the packed NARC")
+        .required()
+        .store_into(target);
+    pack_dir_command.add_argument("directory")
+        .metavar("DIRECTORY")
+        .help("directory to be packed")
+        .required()
+        .store_into(directory);
     pack_command.add_subparser(pack_dir_command);
 
     // knarc unpack
