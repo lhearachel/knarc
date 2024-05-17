@@ -1,4 +1,4 @@
-CXXFLAGS := -std=c++20 -O2 -Wall -Wno-switch -Wpedantic -Wextra -Werror
+CXXFLAGS := -std=c++2a -O2 -Wall -Wno-switch -Wpedantic -Wextra -Werror
 CFLAGS   := -O2 -Wall -Wno-switch -Wpedantic -Wextra -Werror
 
 ifeq ($(OS),Windows_NT)
