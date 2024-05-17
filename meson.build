@@ -21,7 +21,7 @@ c_args = [
 ]
 
 cpp_args = [
-    '-std=c++20',
+    '-std=c++2a',
     '-O2',
     '-Wall',
     '-Wno-switch',
