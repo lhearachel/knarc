@@ -10,7 +10,6 @@
 #include <iostream>
 #include <map>
 #include <memory>
-#include <ranges>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -271,14 +270,15 @@ vector<fs::directory_entry> find_files(const fs::path &dir, const WildcardVector
 
 tuple<narc::FileAllocationTable, vector<narc::FileAllocationTableEntry>> build_fat(vector<fs::directory_entry> &files, ofstream &header_ofs, const string &main_stem, const string &main_stem_upper)
 {
-    auto not_directory = [](fs::directory_entry &e) { return !fs::is_directory(e); };
     vector<narc::FileAllocationTableEntry> fat_entries;
     int member_idx = 0;
 
-    for (auto &entry : files | views::filter(not_directory)) {
-        uint32_t entry_start = fat_entries.empty()
-                                 ? 0
-                                 : fat_entries.back().end;
+    for (auto &entry : files) {
+        if (fs::is_directory(entry)) {
+            continue;
+        }
+
+        uint32_t entry_start = fat_entries.empty() ? 0 : fat_entries.back().end;
         if (entry_start % 4 != 0) {
             entry_start += 4 - (entry_start % 4);
         }
